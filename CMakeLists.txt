@@ -47,32 +47,19 @@ if(IS_PS5_BUILD)
 
     target_include_directories(ps5_overlay PRIVATE
         ${INCLUDE_DIRS}
-        ${PS5_PAYLOAD_SDK}/include
+        ${PS5_PAYLOAD_SDK}/target/include
     )
 
     target_compile_options(ps5_overlay PRIVATE
-        --target=x86_64-sie-ps5
-        -march=znver2
         -O2
         -Wall
         -Wextra
-        -fPIC
-        -fPIE
-        -ffunction-sections
-        -fdata-sections
-    )
-
-    target_link_options(ps5_overlay PRIVATE
-        -Wl,--gc-sections
-        -pie
     )
 
     target_link_libraries(ps5_overlay PRIVATE
         kernel_sys
+        SceNotification
         SceLibcInternal
-        SceSystemService
-        SceSysmodule
-        SceUserService
         SceNet
     )
 

@@ -42,8 +42,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             git wget unzip cmake ninja-build make \
-            clang-18 lld-18 llvm-18 \
+            clang-18 lld-18 llvm-18 llvm-18-dev \
             python3
+
+          # Ensure LLVM toolchain binaries and symlinks are set
+          sudo ln -sf /usr/bin/llvm-config-18 /usr/bin/llvm-config
+          sudo ln -sf /usr/bin/clang-18 /usr/bin/clang
+          sudo ln -sf /usr/bin/clang++-18 /usr/bin/clang++
+          sudo ln -sf /usr/bin/ld.lld-18 /usr/bin/ld.lld
 
       - name: Download and install PS5 Payload SDK
         run: |
@@ -53,25 +59,28 @@ jobs:
           sudo unzip -q /tmp/ps5-payload-sdk.zip -d /opt
           sudo chmod -R 755 /opt/ps5-payload-sdk
           echo "PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk" >> $GITHUB_ENV
+          echo "LLVM_CONFIG=/usr/bin/llvm-config-18" >> $GITHUB_ENV
           echo "/opt/ps5-payload-sdk/bin" >> $GITHUB_PATH
           test -x /opt/ps5-payload-sdk/bin/prospero-cmake
+          test -x /opt/ps5-payload-sdk/bin/prospero-clang
 
       - name: Build ps5_overlay.elf
         run: |
           export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
+          export LLVM_CONFIG=/usr/bin/llvm-config-18
           export PATH="/opt/ps5-payload-sdk/bin:/usr/lib/llvm-18/bin:${PATH}"
-          
+
           mkdir -p build
           cd build
           prospero-cmake .. -DCMAKE_BUILD_TYPE=Release
-          cmake --build . -j$(nproc)
+          cmake --build . --verbose -j$(nproc)
           cd ..
 
           mkdir -p dist
-          if [ -f "build/ps5_overlay.elf" ]; then
+          if [ -f "dist/ps5_overlay.elf" ]; then
+            echo "Artifact in dist/ps5_overlay.elf"
+          elif [ -f "build/ps5_overlay.elf" ]; then
             cp build/ps5_overlay.elf dist/ps5_overlay.elf
-          elif [ -f "dist/ps5_overlay.elf" ]; then
-            echo "Artifact already in dist/ps5_overlay.elf"
           else
             echo "ERROR: ps5_overlay.elf was not produced!"
             exit 1

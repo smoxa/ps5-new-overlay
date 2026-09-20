@@ -19,19 +19,19 @@ typedef void* MonoString;
 typedef void* MonoProperty;
 
 extern "C" {
-    MonoDomain mono_get_root_domain(void);
-    void mono_thread_attach(MonoDomain domain);
-    MonoDomain mono_domain_get(void);
-    MonoImage mono_image_open(const char* name, int* status);
-    MonoClass* mono_class_from_name(MonoImage image, const char* name_space, const char* name);
-    MonoMethod* mono_class_get_method_from_name(MonoClass* klass, const char* name, int param_count);
-    MonoProperty* mono_class_get_property_from_name(MonoClass* klass, const char* name);
-    MonoMethod* mono_property_get_get_method(MonoProperty* prop);
-    MonoMethod* mono_property_get_set_method(MonoProperty* prop);
-    MonoObject* mono_runtime_invoke(MonoMethod* method, void* obj, void** params, MonoObject** exc);
-    MonoString* mono_string_new(MonoDomain domain, const char* text);
-    MonoObject* mono_object_new(MonoDomain domain, MonoClass* klass);
-    void mono_runtime_object_init(MonoObject* obj);
+    __attribute__((weak)) MonoDomain mono_get_root_domain(void);
+    __attribute__((weak)) void mono_thread_attach(MonoDomain domain);
+    __attribute__((weak)) MonoDomain mono_domain_get(void);
+    __attribute__((weak)) MonoImage mono_image_open(const char* name, int* status);
+    __attribute__((weak)) MonoClass* mono_class_from_name(MonoImage image, const char* name_space, const char* name);
+    __attribute__((weak)) MonoMethod* mono_class_get_method_from_name(MonoClass* klass, const char* name, int param_count);
+    __attribute__((weak)) MonoProperty* mono_class_get_property_from_name(MonoClass* klass, const char* name);
+    __attribute__((weak)) MonoMethod* mono_property_get_get_method(MonoProperty* prop);
+    __attribute__((weak)) MonoMethod* mono_property_get_set_method(MonoProperty* prop);
+    __attribute__((weak)) MonoObject* mono_runtime_invoke(MonoMethod* method, void* obj, void** params, MonoObject** exc);
+    __attribute__((weak)) MonoString* mono_string_new(MonoDomain domain, const char* text);
+    __attribute__((weak)) MonoObject* mono_object_new(MonoDomain domain, MonoClass* klass);
+    __attribute__((weak)) void mono_runtime_object_init(MonoObject* obj);
 }
 
 static MonoDomain s_root_domain = nullptr;
@@ -45,13 +45,13 @@ static MonoClass* s_panel_class = nullptr;
 static bool s_shellui_ready = false;
 
 static MonoObject* invoke_method(MonoMethod* method, void* obj, void** params) {
-    if (!method) return nullptr;
+    if (!method || !mono_runtime_invoke) return nullptr;
     MonoObject* exc = nullptr;
     return mono_runtime_invoke(method, obj, params, &exc);
 }
 
 static void set_property_string(MonoClass* cls, MonoObject* obj, const char* prop_name, const char* val) {
-    if (!cls || !obj) return;
+    if (!cls || !obj || !mono_class_get_property_from_name || !mono_property_get_set_method || !mono_string_new) return;
     MonoProperty* prop = mono_class_get_property_from_name(cls, prop_name);
     if (!prop) return;
     MonoMethod* setter = mono_property_get_set_method(prop);
@@ -62,7 +62,7 @@ static void set_property_string(MonoClass* cls, MonoObject* obj, const char* pro
 }
 
 static void set_property_float(MonoClass* cls, MonoObject* obj, const char* prop_name, float val) {
-    if (!cls || !obj) return;
+    if (!cls || !obj || !mono_class_get_property_from_name || !mono_property_get_set_method) return;
     MonoProperty* prop = mono_class_get_property_from_name(cls, prop_name);
     if (!prop) return;
     MonoMethod* setter = mono_property_get_set_method(prop);
@@ -72,7 +72,7 @@ static void set_property_float(MonoClass* cls, MonoObject* obj, const char* prop
 }
 
 static void set_property_bool(MonoClass* cls, MonoObject* obj, const char* prop_name, bool val) {
-    if (!cls || !obj) return;
+    if (!cls || !obj || !mono_class_get_property_from_name || !mono_property_get_set_method) return;
     MonoProperty* prop = mono_class_get_property_from_name(cls, prop_name);
     if (!prop) return;
     MonoMethod* setter = mono_property_get_set_method(prop);
@@ -83,7 +83,7 @@ static void set_property_bool(MonoClass* cls, MonoObject* obj, const char* prop_
 }
 
 static void set_property_int(MonoClass* cls, MonoObject* obj, const char* prop_name, int val) {
-    if (!cls || !obj) return;
+    if (!cls || !obj || !mono_class_get_property_from_name || !mono_property_get_set_method) return;
     MonoProperty* prop = mono_class_get_property_from_name(cls, prop_name);
     if (!prop) return;
     MonoMethod* setter = mono_property_get_set_method(prop);
@@ -94,6 +94,11 @@ static void set_property_int(MonoClass* cls, MonoObject* obj, const char* prop_n
 
 static bool init_shellui_pui(const OverlayConfig* config) {
     if (s_shellui_ready) return true;
+
+    /* Verify that Mono functions are available in current address space */
+    if (!mono_get_root_domain || !mono_thread_attach || !mono_image_open || !mono_class_from_name) {
+        return false;
+    }
 
     s_root_domain = mono_get_root_domain();
     if (!s_root_domain) return false;
@@ -118,7 +123,7 @@ static bool init_shellui_pui(const OverlayConfig* config) {
 
     /* Locate RootWidget from Game/Current scene */
     MonoProperty* root_prop = mono_class_get_property_from_name(scene_class, "RootWidget");
-    if (root_prop) {
+    if (root_prop && mono_property_get_get_method) {
         MonoMethod* getter = mono_property_get_get_method(root_prop);
         if (getter) {
             s_root_widget = invoke_method(getter, nullptr, nullptr);
@@ -128,42 +133,42 @@ static bool init_shellui_pui(const OverlayConfig* config) {
     if (!s_root_widget) return false;
 
     /* Build HUD Background Panel */
-    s_bg_panel = mono_object_new(s_root_domain, s_panel_class);
-    if (s_bg_panel) {
-        mono_runtime_object_init(s_bg_panel);
-        set_property_string(s_panel_class, s_bg_panel, "Name", "ps5_overlay_panel");
-        set_property_float(s_panel_class, s_bg_panel, "X", 0.0f);
-        set_property_float(s_panel_class, s_bg_panel, "Y", config->position == 1 ? 1040.0f : 0.0f);
-        set_property_float(s_panel_class, s_bg_panel, "Width", 1920.0f);
-        set_property_float(s_panel_class, s_bg_panel, "Height", (float)(config->font_size + 14));
-        set_property_bool(s_panel_class, s_bg_panel, "BackgroundVisibility", config->background_panel);
-        set_property_float(s_panel_class, s_bg_panel, "BackgroundOpacity", 0.75f);
+    if (mono_object_new && mono_runtime_object_init) {
+        s_bg_panel = mono_object_new(s_root_domain, s_panel_class);
+        if (s_bg_panel) {
+            mono_runtime_object_init(s_bg_panel);
+            set_property_string(s_panel_class, s_bg_panel, "Name", "ps5_overlay_panel");
+            set_property_float(s_panel_class, s_bg_panel, "X", 0.0f);
+            set_property_float(s_panel_class, s_bg_panel, "Y", config->position == 1 ? 1040.0f : 0.0f);
+            set_property_float(s_panel_class, s_bg_panel, "Width", 1920.0f);
+            set_property_float(s_panel_class, s_bg_panel, "Height", (float)(config->font_size + 14));
+            set_property_bool(s_panel_class, s_bg_panel, "BackgroundVisibility", config->background_panel);
+            set_property_float(s_panel_class, s_bg_panel, "BackgroundOpacity", 0.75f);
 
-        /* Append panel to root */
-        MonoMethod* append_method = mono_class_get_method_from_name(s_widget_class, "AppendChild", 1);
-        if (append_method) {
-            void* args[1] = { s_bg_panel };
-            invoke_method(append_method, s_root_widget, args);
+            MonoMethod* append_method = mono_class_get_method_from_name(s_widget_class, "AppendChild", 1);
+            if (append_method) {
+                void* args[1] = { s_bg_panel };
+                invoke_method(append_method, s_root_widget, args);
+            }
         }
-    }
 
-    /* Build HUD Label */
-    s_hud_label = mono_object_new(s_root_domain, s_label_class);
-    if (s_hud_label) {
-        mono_runtime_object_init(s_hud_label);
-        set_property_string(s_label_class, s_hud_label, "Name", "ps5_overlay_label");
-        set_property_float(s_label_class, s_hud_label, "MarginLeft", 24.0f);
-        set_property_float(s_label_class, s_hud_label, "MarginTop", 4.0f);
-        set_property_float(s_label_class, s_hud_label, "Width", 1872.0f);
-        set_property_int(s_label_class, s_hud_label, "HorizontalAlignment", 0); /* Left */
-        set_property_int(s_label_class, s_hud_label, "VerticalAlignment", 0);   /* Top */
-        set_property_string(s_label_class, s_hud_label, "Text", "PS5 Overlay Loading...");
+        /* Build HUD Label */
+        s_hud_label = mono_object_new(s_root_domain, s_label_class);
+        if (s_hud_label) {
+            mono_runtime_object_init(s_hud_label);
+            set_property_string(s_label_class, s_hud_label, "Name", "ps5_overlay_label");
+            set_property_float(s_label_class, s_hud_label, "MarginLeft", 24.0f);
+            set_property_float(s_label_class, s_hud_label, "MarginTop", 4.0f);
+            set_property_float(s_label_class, s_hud_label, "Width", 1872.0f);
+            set_property_int(s_label_class, s_hud_label, "HorizontalAlignment", 0);
+            set_property_int(s_label_class, s_hud_label, "VerticalAlignment", 0);
+            set_property_string(s_label_class, s_hud_label, "Text", "PS5 Overlay Active");
 
-        /* Append label to panel or root */
-        MonoMethod* append_method = mono_class_get_method_from_name(s_widget_class, "AppendChild", 1);
-        if (append_method) {
-            void* args[1] = { s_hud_label };
-            invoke_method(append_method, s_bg_panel ? s_bg_panel : s_root_widget, args);
+            MonoMethod* append_method = mono_class_get_method_from_name(s_widget_class, "AppendChild", 1);
+            if (append_method) {
+                void* args[1] = { s_hud_label };
+                invoke_method(append_method, s_bg_panel ? s_bg_panel : s_root_widget, args);
+            }
         }
     }
 
@@ -229,7 +234,7 @@ void overlay_ui_shutdown(void) {
     pthread_mutex_lock(&s_ui_mutex);
 
 #if defined(__PS5__) || defined(PS5)
-    if (s_shellui_ready && s_root_widget && s_widget_class) {
+    if (s_shellui_ready && s_root_widget && s_widget_class && mono_class_get_method_from_name) {
         MonoMethod* remove_method = mono_class_get_method_from_name(s_widget_class, "RemoveChild", 1);
         if (remove_method && s_bg_panel) {
             void* args[1] = { s_bg_panel };
