@@ -43,19 +43,17 @@ static void (*mono_runtime_object_init)(MonoObject* obj) = nullptr;
 static uint64_t (*mono_compile_method)(MonoMethod* method) = nullptr;
 
 /* Hardware monitor functions */
-extern "C" {
-    __attribute__((weak)) int sceKernelGetCpuTemperature(int* cputemp);
-    __attribute__((weak)) int sceKernelGetSocSensorTemperature(int sensorId, int* soctime);
-    __attribute__((weak)) int get_page_table_stats(int vm, int type, int* total, int* free);
-    __attribute__((weak)) int sceKernelGetCurrentFanDuty(uint16_t* duty, uint64_t* chassis);
-}
+static int (*sys_sceKernelGetCpuTemperature)(int* cputemp) = nullptr;
+static int (*sys_sceKernelGetSocSensorTemperature)(int sensorId, int* soctime) = nullptr;
+static int (*sys_sceKernelGetCurrentFanDuty)(uint16_t* duty, uint64_t* chassis) = nullptr;
 
 #define KERNEL_DLSYM(handle, name) \
-    name = (decltype(name))kernel_dynlib_dlsym(-1, handle, #name)
+    syscall(591, handle, #name, (void**)&name)
 
 static int get_module_handle_internal(const char* name) {
     uint32_t handle = 0;
-    if (kernel_dynlib_handle(-1, name, &handle) == 0 && handle != 0) {
+    // SYS_dynlib_load_prx is 594
+    if (syscall(594, name, 0, &handle, 0) == 0 && handle != 0) {
         return (int)handle;
     }
     return 0;
@@ -83,6 +81,13 @@ static bool resolve_mono_symbols(void) {
     KERNEL_DLSYM(libmono, mono_object_unbox);
     KERNEL_DLSYM(libmono, mono_runtime_object_init);
     KERNEL_DLSYM(libmono, mono_compile_method);
+
+    int libkernel = get_module_handle_internal("libkernel_sys.sprx");
+    if (!libkernel) libkernel = 0x2001;
+
+    syscall(591, libkernel, "sceKernelGetCpuTemperature", (void**)&sys_sceKernelGetCpuTemperature);
+    syscall(591, libkernel, "sceKernelGetSocSensorTemperature", (void**)&sys_sceKernelGetSocSensorTemperature);
+    syscall(591, libkernel, "sceKernelGetCurrentFanDuty", (void**)&sys_sceKernelGetCurrentFanDuty);
 
     return (mono_get_root_domain && mono_thread_attach && mono_class_from_name);
 }
@@ -232,25 +237,21 @@ static void overlay_worker_loop(MonoDomain* domain, MonoClass* label_class,
 
     while (true) {
         int cpu_temp = 0;
-        if (sceKernelGetCpuTemperature) {
-            sceKernelGetCpuTemperature(&cpu_temp);
+        if (sys_sceKernelGetCpuTemperature) {
+            sys_sceKernelGetCpuTemperature(&cpu_temp);
         }
 
         int gpu_temp = 0;
-        if (sceKernelGetSocSensorTemperature) {
-            sceKernelGetSocSensorTemperature(0, &gpu_temp);
+        if (sys_sceKernelGetSocSensorTemperature) {
+            sys_sceKernelGetSocSensorTemperature(0, &gpu_temp);
         }
 
-        int ram_total = 0, ram_free = 0;
-        if (get_page_table_stats) {
-            get_page_table_stats(1, 1, &ram_total, &ram_free);
-        }
-        int ram_used_mb = (ram_total > ram_free) ? (ram_total - ram_free) : 0;
+        int ram_used_mb = 0; // RAM stats not easily available via standard syscalls
 
         uint16_t fan_duty = 0;
         uint64_t chassis = 0;
         double fan_pct = 0.0;
-        if (sceKernelGetCurrentFanDuty && sceKernelGetCurrentFanDuty(&fan_duty, &chassis) == 0) {
+        if (sys_sceKernelGetCurrentFanDuty && sys_sceKernelGetCurrentFanDuty(&fan_duty, &chassis) == 0) {
             fan_pct = ((double)fan_duty * 100.0) / 1024.0;
         }
 
@@ -267,8 +268,7 @@ static void overlay_worker_loop(MonoDomain* domain, MonoClass* label_class,
         }
 
         if (ram_val_label) {
-            snprintf(buf, sizeof(buf), "%d MB", ram_used_mb);
-            set_property_string(domain, label_class, ram_val_label, "Text", buf);
+            set_property_string(domain, label_class, ram_val_label, "Text", "N/A");
         }
 
         if (fan_val_label) {

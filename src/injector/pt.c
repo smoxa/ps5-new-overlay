@@ -23,11 +23,9 @@ static int sys_ptrace(int request, pid_t pid, caddr_t addr, int data) {
 }
 
 intptr_t pt_resolve(pid_t pid, const char* nid) {
-    intptr_t addr;
-    if ((addr = kernel_dynlib_resolve(pid, 0x1, nid))) {
-        return addr;
-    }
-    return kernel_dynlib_resolve(pid, 0x2001, nid);
+    (void)pid;
+    (void)nid;
+    return 0;
 }
 
 int pt_attach(pid_t pid) {
@@ -200,8 +198,25 @@ long pt_call2(pid_t pid, intptr_t addr, ...) {
     return jmp_reg.r_rax;
 }
 
+static intptr_t find_remote_syscall(pid_t pid) {
+    struct reg r;
+    if (pt_getregs(pid, &r) < 0) return 0;
+    
+    intptr_t start = (r.r_rip & ~0xFFF);
+    uint8_t buf[0x2000];
+    if (pt_copyout(pid, start, buf, sizeof(buf)) < 0) return 0;
+    
+    for (size_t i = 0; i < sizeof(buf) - 1; i++) {
+        if (buf[i] == 0x0F && buf[i+1] == 0x05) {
+            return start + i;
+        }
+    }
+    return 0;
+}
+
 long pt_syscall(pid_t pid, int sysno, ...) {
-    intptr_t addr = pt_resolve(pid, "HoLVWNanBBc");
+    static intptr_t cached_syscall_addr = 0;
+    intptr_t addr = cached_syscall_addr ? cached_syscall_addr : (cached_syscall_addr = find_remote_syscall(pid));
     struct reg jmp_reg;
     struct reg bak_reg;
     uintptr_t entry_rsp;
@@ -210,7 +225,7 @@ long pt_syscall(pid_t pid, int sysno, ...) {
     if (!addr) {
         return -1;
     }
-    addr += 0xa;
+    // addr points directly to `syscall`, no +0xa needed.
 
     if (pt_getregs(pid, &bak_reg)) {
         return -1;

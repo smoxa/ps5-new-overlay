@@ -129,20 +129,11 @@ intptr_t elfldr_load(pid_t pid, uint8_t *elf) {
 
     for (int i = 0; i < ehdr->e_phnum && !error; i++) {
         if (phdr[i].p_type != PT_LOAD || phdr[i].p_memsz == 0) continue;
-        if (phdr[i].p_flags & PF_X) {
-            if (kernel_mprotect(pid, ctx.base_addr + phdr[i].p_vaddr,
-                                ROUND_PG(phdr[i].p_memsz),
-                                PFLAGS(phdr[i].p_flags))) {
-                perror("[ELFLDR] kernel_mprotect failed");
-                error = 1;
-            }
-        } else {
-            if (pt_mprotect(pid, ctx.base_addr + phdr[i].p_vaddr,
-                            ROUND_PG(phdr[i].p_memsz),
-                            PFLAGS(phdr[i].p_flags))) {
-                perror("[ELFLDR] pt_mprotect failed");
-                error = 1;
-            }
+        if (pt_mprotect(pid, ctx.base_addr + phdr[i].p_vaddr,
+                        ROUND_PG(phdr[i].p_memsz),
+                        PFLAGS(phdr[i].p_flags))) {
+            perror("[ELFLDR] pt_mprotect failed");
+            error = 1;
         }
     }
 
@@ -157,70 +148,7 @@ intptr_t elfldr_load(pid_t pid, uint8_t *elf) {
     return ctx.base_addr + ehdr->e_entry;
 }
 
-intptr_t elfldr_payload_args(pid_t pid) {
-    intptr_t buf = pt_mmap(pid, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
-                           MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    if (buf == -1) {
-        return 0;
-    }
-
-    int master_sock = pt_socket(pid, AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
-    if (master_sock < 0) {
-        return 0;
-    }
-
-    pt_setint(pid, buf + 0x00, 20);
-    pt_setint(pid, buf + 0x04, IPPROTO_IPV6);
-    pt_setint(pid, buf + 0x08, IPV6_TCLASS);
-    pt_setint(pid, buf + 0x0c, 0);
-    pt_setint(pid, buf + 0x10, 0);
-    pt_setint(pid, buf + 0x14, 0);
-    pt_setsockopt(pid, master_sock, IPPROTO_IPV6, IPV6_2292PKTOPTIONS, buf, 24);
-
-    int victim_sock = pt_socket(pid, AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
-    if (victim_sock < 0) {
-        return 0;
-    }
-
-    pt_setint(pid, buf + 0x00, 0);
-    pt_setint(pid, buf + 0x04, 0);
-    pt_setint(pid, buf + 0x08, 0);
-    pt_setint(pid, buf + 0x0c, 0);
-    pt_setint(pid, buf + 0x10, 0);
-    pt_setsockopt(pid, victim_sock, IPPROTO_IPV6, IPV6_PKTINFO, buf, 20);
-
-    if (kernel_overlap_sockets(pid, master_sock, victim_sock)) {
-        return 0;
-    }
-
-    if (pt_pipe(pid, buf)) {
-        return 0;
-    }
-    int pipe0 = pt_getint(pid, buf);
-    int pipe1 = pt_getint(pid, buf + 4);
-
-    intptr_t args       = buf;
-    intptr_t rwpipe     = buf + 0x100;
-    intptr_t rwpair     = buf + 0x200;
-    intptr_t kpipe_addr = kernel_get_proc_file(pid, pipe0);
-    intptr_t payloadout = buf + 0x300;
-    intptr_t getpid_fn  = pt_resolve(pid, "HoLVWNanBBc");
-
-    pt_setlong(pid, args + 0x00, getpid_fn);
-    pt_setlong(pid, args + 0x08, rwpipe);
-    pt_setlong(pid, args + 0x10, rwpair);
-    pt_setlong(pid, args + 0x18, kpipe_addr);
-    pt_setlong(pid, args + 0x20, KERNEL_ADDRESS_DATA_BASE);
-    pt_setlong(pid, args + 0x28, payloadout);
-    pt_setint(pid, rwpipe + 0, pipe0);
-    pt_setint(pid, rwpipe + 4, pipe1);
-    pt_setint(pid, rwpair + 0, master_sock);
-    pt_setint(pid, rwpair + 4, victim_sock);
-    pt_setint(pid, payloadout, 0);
-
-    return args;
-}
-
+intptr_t elfldr_payload_args(pid_t pid) { (void)pid; return 0; }
 #else
 int elfldr_sanity_check(uint8_t *elf, size_t elf_size) { (void)elf; (void)elf_size; return 0; }
 intptr_t elfldr_load(pid_t pid, uint8_t *elf) { (void)pid; (void)elf; return 0; }
