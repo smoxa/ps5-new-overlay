@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define PS5_OVERLAY_VERSION "1.0.13"
+#define PS5_OVERLAY_VERSION "1.0.14"
 #define PS5_OVERLAY_DEFAULT_CONFIG_PATH "/data/ps5_overlay/config.ini"
 
 #ifdef __cplusplus
@@ -13,6 +13,7 @@ extern "C" {
 
 /* Hardware metrics snapshot */
 typedef struct {
+    float fps;                /* Current frames per second (scanout/render) */
     int cpu_temp;             /* Celsius */
     int soc_temp;             /* Celsius (APU/GPU) */
     float cpu_usage;          /* Total CPU load % */
@@ -29,6 +30,7 @@ typedef struct {
 /* Overlay configuration */
 typedef struct {
     bool enabled;
+    bool show_fps;
     bool show_cpu_temp;
     bool show_cpu_load;
     bool show_all_cores;

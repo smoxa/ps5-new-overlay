@@ -305,6 +305,39 @@ static MonoObject* create_hud_item(MonoDomain* domain, MonoImage* pui_img,
     widget_append_child(widget_class, cell, label);
     return label;
 }
+
+static float get_fps_reading(void) {
+    /* 1. Try reading OnionHEN fps sample file if present */
+    int fd = open("/system_tmp/fps_sample", O_RDONLY);
+    if (fd >= 0) {
+        uint8_t buf[128] = {0};
+        ssize_t n = read(fd, buf, sizeof(buf));
+        close(fd);
+        if (n >= 48) {
+            uint32_t magic = *(uint32_t*)buf;
+            if (magic == 0x4F465053u) { /* 'OFPS' */
+                uint8_t valid = buf[12];
+                if (valid) {
+                    float fps = *(float*)(buf + 16);
+                    if (fps > 0.0f && fps <= 245.0f) return fps;
+                }
+            }
+        }
+    }
+
+    /* 2. Try reading /system_tmp/ps5_fps.txt written by ps5_overlay daemon */
+    FILE* fp = fopen("/system_tmp/ps5_fps.txt", "r");
+    if (fp) {
+        float f = 0.0f;
+        if (fscanf(fp, "%f", &f) == 1 && f > 0.0f && f <= 245.0f) {
+            fclose(fp);
+            return f;
+        }
+        fclose(fp);
+    }
+
+    return 0.0f;
+}
 #endif
 
 int main(int argc, const char* argv[]) {
@@ -375,6 +408,7 @@ int main(int argc, const char* argv[]) {
     log_shellui("[SHELLUI] Overlay ready! Entering game monitoring loop...\n");
 
     MonoObject* bg_panel = nullptr;
+    MonoObject* fps_val = nullptr;
     MonoObject* cpu_val = nullptr;
     MonoObject* gpu_val = nullptr;
     MonoObject* ram_val = nullptr;
@@ -424,35 +458,43 @@ int main(int argc, const char* argv[]) {
 
                 float y = 5.0f;
 
+                // FPS: #FFEB3B (Gold/Yellow)
+                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                "id_fps_lbl", 24.0f, y, "FPS", hud_font, 1.0f, 235.0f/255.0f, 59.0f/255.0f);
+                fps_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                          "id_fps_val", 68.0f, y, "--", hud_font, 1.0f, 1.0f, 1.0f);
+                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                "id_sep0", 116.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
+
                 // CPU: #66FF66
                 create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_cpu_lbl", 24.0f, y, "CPU", hud_font, 102.0f/255.0f, 1.0f, 102.0f/255.0f);
+                                "id_cpu_lbl", 136.0f, y, "CPU", hud_font, 102.0f/255.0f, 1.0f, 102.0f/255.0f);
                 cpu_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                          "id_cpu_val", 72.0f, y, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
+                                          "id_cpu_val", 184.0f, y, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
                 create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_sep1", 138.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
+                                "id_sep1", 250.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
 
                 // GPU: #B366FF
                 create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_gpu_lbl", 158.0f, y, "GPU", hud_font, 179.0f/255.0f, 102.0f/255.0f, 1.0f);
+                                "id_gpu_lbl", 270.0f, y, "GPU", hud_font, 179.0f/255.0f, 102.0f/255.0f, 1.0f);
                 gpu_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                          "id_gpu_val", 206.0f, y, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
+                                          "id_gpu_val", 318.0f, y, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
                 create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_sep2", 270.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
+                                "id_sep2", 382.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
 
                 // RAM: #FFB34D
                 create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_ram_lbl", 290.0f, y, "RAM", hud_font, 1.0f, 179.0f/255.0f, 77.0f/255.0f);
+                                "id_ram_lbl", 402.0f, y, "RAM", hud_font, 1.0f, 179.0f/255.0f, 77.0f/255.0f);
                 ram_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                          "id_ram_val", 344.0f, y, "-- GB", hud_font, 1.0f, 1.0f, 1.0f);
+                                          "id_ram_val", 456.0f, y, "-- GB", hud_font, 1.0f, 1.0f, 1.0f);
                 create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_sep3", 452.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
+                                "id_sep3", 564.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
 
                 // FAN: #33E0FF
                 create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_fan_lbl", 472.0f, y, "FAN", hud_font, 51.0f/255.0f, 224.0f/255.0f, 1.0f);
+                                "id_fan_lbl", 584.0f, y, "FAN", hud_font, 51.0f/255.0f, 224.0f/255.0f, 1.0f);
                 fan_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                          "id_fan_val", 518.0f, y, "--%", hud_font, 1.0f, 1.0f, 1.0f);
+                                          "id_fan_val", 630.0f, y, "--%", hud_font, 1.0f, 1.0f, 1.0f);
 
                 last_attached_scene = game_scene;
                 attached_to_game = true;
@@ -467,6 +509,8 @@ int main(int argc, const char* argv[]) {
 
         /* Update metrics if attached */
         if (attached_to_game) {
+            float fps = get_fps_reading();
+
             int cpu_temp = 0;
             if (sys_sceKernelGetCpuTemperature) {
                 sys_sceKernelGetCpuTemperature(&cpu_temp);
@@ -485,6 +529,15 @@ int main(int argc, const char* argv[]) {
             }
 
             char buf[32];
+            if (fps_val) {
+                if (fps > 0.5f) {
+                    snprintf(buf, sizeof(buf), "%.0f", fps);
+                } else {
+                    snprintf(buf, sizeof(buf), "--");
+                }
+                Set_Property(label_class, fps_val, "Text", mono_string_new(domain, buf));
+            }
+
             if (cpu_val) {
                 snprintf(buf, sizeof(buf), "%d°C", cpu_temp);
                 Set_Property(label_class, cpu_val, "Text", mono_string_new(domain, buf));

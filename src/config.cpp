@@ -7,6 +7,7 @@
 void config_set_defaults(OverlayConfig* config) {
     if (!config) return;
     config->enabled = true;
+    config->show_fps = true;
     config->show_cpu_temp = true;
     config->show_cpu_load = true;
     config->show_all_cores = false;
@@ -68,6 +69,8 @@ bool config_load(OverlayConfig* config, const char* filepath) {
 
         if (strcasecmp(key, "enabled") == 0) {
             config->enabled = parse_bool(val, config->enabled);
+        } else if (strcasecmp(key, "show_fps") == 0) {
+            config->show_fps = parse_bool(val, config->show_fps);
         } else if (strcasecmp(key, "show_cpu_temp") == 0) {
             config->show_cpu_temp = parse_bool(val, config->show_cpu_temp);
         } else if (strcasecmp(key, "show_cpu_load") == 0) {
@@ -121,6 +124,7 @@ bool config_save(const OverlayConfig* config, const char* filepath) {
 
     fprintf(fp, "[ps5_overlay]\n");
     fprintf(fp, "enabled=%s\n", config->enabled ? "true" : "false");
+    fprintf(fp, "show_fps=%s\n", config->show_fps ? "true" : "false");
     fprintf(fp, "position=%s\n", config->position == 1 ? "bottom" : "top");
     fprintf(fp, "show_cpu_temp=%s\n", config->show_cpu_temp ? "true" : "false");
     fprintf(fp, "show_cpu_load=%s\n", config->show_cpu_load ? "true" : "false");

@@ -5,6 +5,8 @@
 #include <unistd.h>
 
 #if defined(__PS5__) || defined(PS5)
+#include <fcntl.h>
+#include <sys/ioctl.h>
 
 struct OrbisKernelTimespec {
     int64_t tv_sec;
@@ -116,12 +118,105 @@ static void compute_cpu_usage(ThreadSnapshot* cur, ThreadSnapshot* prev, float* 
     }
 }
 
+struct DceIoctlArg {
+    uint64_t selector;
+    uint64_t mask;
+    uint64_t output;
+    uint64_t reserved[3];
+};
+
+static int s_dce_fd = -1;
+static uint64_t s_prev_flip_count = 0;
+static struct timespec s_prev_flip_time = {0, 0};
+static float s_measured_fps = 0.0f;
+
+static float sample_dce_fps(void) {
+    /* 1. Check OnionHEN FPS seqlock file if present */
+    int fd_sample = open("/system_tmp/fps_sample", O_RDONLY);
+    if (fd_sample >= 0) {
+        uint8_t buf[128] = {0};
+        ssize_t n = read(fd_sample, buf, sizeof(buf));
+        close(fd_sample);
+        if (n >= 48) {
+            uint32_t magic = *(uint32_t*)buf;
+            if (magic == 0x4F465053u) { /* 'OFPS' */
+                uint8_t valid = buf[12];
+                if (valid) {
+                    float fps = *(float*)(buf + 16);
+                    if (fps > 0.0f && fps <= 245.0f) {
+                        s_measured_fps = fps;
+                        FILE* fp = fopen("/system_tmp/ps5_fps.txt", "w");
+                        if (fp) {
+                            fprintf(fp, "%.1f\n", s_measured_fps);
+                            fclose(fp);
+                        }
+                        return s_measured_fps;
+                    }
+                }
+            }
+        }
+    }
+
+    /* 2. Direct hardware Display Controller Engine /dev/dce */
+    if (s_dce_fd < 0) {
+        s_dce_fd = open("/dev/dce", O_RDWR);
+    }
+    if (s_dce_fd >= 0) {
+        uint8_t out[0x60] = {0};
+        DceIoctlArg arg{};
+        arg.selector = 0x10000000AULL;
+        arg.mask = 0x8000000000ULL;
+        arg.output = (uint64_t)out;
+
+        int rc = ioctl(s_dce_fd, 0x80308217UL, &arg);
+        if (rc < 0) {
+            rc = ioctl(s_dce_fd, 0xFFFFFFFF80308217UL, &arg);
+        }
+
+        if (rc == 0) {
+            uint64_t flip_count = *(uint64_t*)(out + 8);
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+
+            if (s_prev_flip_time.tv_sec != 0) {
+                double dt = (double)(now.tv_sec - s_prev_flip_time.tv_sec) +
+                            (double)(now.tv_nsec - s_prev_flip_time.tv_nsec) * 1e-9;
+                if (dt >= 0.2) {
+                    uint64_t delta = (flip_count >= s_prev_flip_count) ? (flip_count - s_prev_flip_count) : 0;
+                    float raw = (float)((double)delta / dt);
+                    if (raw >= 0.0f && raw <= 245.0f) {
+                        s_measured_fps = raw;
+                    }
+                    s_prev_flip_count = flip_count;
+                    s_prev_flip_time = now;
+                }
+            } else {
+                s_prev_flip_count = flip_count;
+                s_prev_flip_time = now;
+            }
+        }
+    }
+
+    if (s_measured_fps > 0.0f) {
+        FILE* fp = fopen("/system_tmp/ps5_fps.txt", "w");
+        if (fp) {
+            fprintf(fp, "%.1f\n", s_measured_fps);
+            fclose(fp);
+        }
+    }
+
+    return s_measured_fps;
+}
+
 #endif
 
 bool monitor_update(HardwareMetrics* metrics) {
     if (!metrics) return false;
 
 #if defined(__PS5__) || defined(PS5)
+    /* 0. FPS */
+    metrics->fps = sample_dce_fps();
+
     /* 1. CPU Temperature */
     int cpu_t = 0;
     if (sceKernelGetCpuTemperature(&cpu_t) == 0) {
@@ -181,6 +276,7 @@ bool monitor_update(HardwareMetrics* metrics) {
 
 #else
     /* Mock data for non-PS5 host development/testing */
+    metrics->fps = 60.0f;
     metrics->cpu_temp = 58;
     metrics->soc_temp = 62;
     metrics->cpu_usage = 23.5f;
@@ -210,6 +306,13 @@ void monitor_format_hud_string(const HardwareMetrics* m, const OverlayConfig* cf
         }
         first = false;
     };
+
+    /* FPS */
+    if (cfg->show_fps && m->fps > 0.0f) {
+        append_sep();
+        snprintf(item, sizeof(item), "FPS: %.0f", m->fps);
+        strncat(buffer, item, max_len - strlen(buffer) - 1);
+    }
 
     /* CPU temp & load */
     if (cfg->show_cpu_temp || cfg->show_cpu_load) {
