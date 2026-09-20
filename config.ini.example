@@ -12,6 +12,9 @@ enabled = true
 # Screen position for 2D bar: "top" or "bottom"
 position = top
 
+# Show real-time in-game FPS counter (Hardware scanout / DCE)
+show_fps = true
+
 # Show CPU temperature (Celsius)
 show_cpu_temp = true
 

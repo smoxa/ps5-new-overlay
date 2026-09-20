@@ -12,8 +12,10 @@
 
 ### Основные возможности
 
+- ⚡ **Аппаратный счётчик кадров (FPS Counter)**: Замер реальной частоты вертикальной синхронизации и смены кадров дисплея через Display Controller Engine (`/dev/dce`) или секлок OnionHEN (`/system_tmp/fps_sample`).
 - 🖥️ **Нативный экранный оверлей (In-Game HUD)**: Настоящая полоса мониторинга, отрисовываемая прямо поверх игр через внедрение в `SceShellUI` (с активным `kstuff`).
 - 🎨 **Цветовая дифференциация метрик**:
+  - **FPS**: золотисто-жёлтый (`#FFEB3B`)
   - **CPU**: зеленый (`#66FF66`)
   - **GPU**: фиолетовый (`#B366FF`)
   - **RAM**: оранжевый (`#FFB34D`)
@@ -33,7 +35,7 @@
    - Внедряется автоматически в системный процесс `SceShellUI`.
    - В верхней части экрана во время любой игры отображается стильная полупрозрачная плашка с цветными показателями:
      ```text
-     CPU: 58°C  |  GPU: 61°C  |  RAM: 2540 MB  |  FAN: 35%
+     FPS: 60  |  CPU: 58°C  |  GPU: 61°C  |  RAM: 4.8 GB  |  FAN: 35%
      ```
 2. **Второй экран (Смартфон / Планшет / ПК)**:
    - Откройте в браузере любого устройства в домашней сети адрес:
@@ -77,6 +79,7 @@ nc -w 3 <IP_PS5> 9020 < ps5_overlay.elf
 ```ini
 [ps5_overlay]
 enabled = true
+show_fps = true             ; Счётчик FPS (Hardware DCE / OnionHEN)
 show_cpu_temp = true        ; Температура CPU
 show_cpu_load = true        ; Загрузка CPU %
 show_all_cores = false      ; Нагрузка по ядрам
@@ -86,8 +89,8 @@ show_ram = true             ; Использование RAM
 show_fan = true             ; Обороты кулера %
 interval_ms = 1000          ; Опрос сенсоров (мс)
 
-toast_notifications = true  ; Экранный OSD в играх (true/false)
-toast_interval_sec = 4      ; Интервал обновления OSD (сек)
+toast_notifications = false ; Экранный OSD в играх (true/false)
+toast_interval_sec = 10     ; Интервал обновления OSD (сек)
 
 web_server = true           ; Встроенный Web HUD сервер
 web_port = 8080             ; Порт Web HUD (по умолч. 8080)
@@ -104,13 +107,15 @@ Unlike full HEN suites (like onionHEN or etaHEN), this project focuses **exclusi
 
 ### Features
 
+- ⚡ **Real-Time In-Game FPS Counter**: Accurate framerate monitoring sampled via Display Controller Engine (`/dev/dce`) hardware flip deltas or OnionHEN seqlock sampler (`/system_tmp/fps_sample`).
+- 🖥️ **Native In-Game HUD**: Translucent top-screen status bar rendered seamlessly over active gameplay via Mono PUI in `SceShellUI`.
 - 🌡️ **CPU Temperature**: Real-time reading of internal Zen 2 CPU sensors.
 - 🎯 **CPU Utilization**: Accurate CPU load percentage and 8-core tracks.
 - 🔥 **GPU / SoC Temperature**: APU / SoC thermal monitoring.
 - 🎮 **VRAM Usage**: Video memory usage percentage and MB.
 - 💾 **System RAM**: Memory footprint in GB and percentage (`4.8 / 16.0 GB`).
 - 🌀 **Fan Duty Cycle**: Real-time cooling fan speed percentage.
-- 🔔 **Native In-Game Toast OSD**: Dual-line HUD notifications updating smoothly over games (`OverwriteLatest`).
+- 🔕 **Zero Toast Spam**: Notification popups disabled by default to protect gameplay immersion.
 - 🌐 **Embedded Web HUD (Port 8080)**: Dark PlayStation-themed real-time dashboard accessible via smartphone, PC, or PS5 "Pin to Side" browser.
 - ⚙️ **Configurable**: Managed via `/data/ps5_overlay/config.ini`.
 

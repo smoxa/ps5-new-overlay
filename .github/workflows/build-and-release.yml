@@ -140,11 +140,18 @@ jobs:
             
             Lightweight, standalone in-game hardware monitoring overlay for jailbroken PlayStation 5 (FW 1.xx - 10.xx+, kstuff active).
             
-            ### ✨ What's New in This Release
+            ### ✨ What's New in v1.0.14
+            - **⚡ Real-Time In-Game FPS Counter**:
+              - Hardware scanout flip delta sampling via Display Controller Engine (`/dev/dce`, `ioctl 0x80308217`).
+              - Native fallback support for OnionHEN seqlock sampler (`/system_tmp/fps_sample`).
+              - Dedicated **FPS** badge in gold/yellow (`#FFEB3B`) with live framerate (`60` / `120` / `--`).
+              - Dedicated **Frame Rate** card on Web HUD dashboard and live floating `/bar`.
+              - Configurable via `show_fps = true` in `/data/ps5_overlay/config.ini`.
             - **🖥️ Native On-Screen In-Game HUD**:
               - Automatically injected into `SceShellUI` via `ptrace` (with `kstuff` active).
               - Rendered directly on top of gameplay via Mono PUI (`Scene.RootWidget`).
               - Sleek translucent 2D bar at top of screen with color-coded metrics:
+                - **FPS** (Gold/Yellow `#FFEB3B`)
                 - **CPU** (Green `#66FF66`)
                 - **GPU** (Purple `#B366FF`)
                 - **RAM** (Orange `#FFB34D`)
