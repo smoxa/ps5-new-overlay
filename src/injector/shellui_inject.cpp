@@ -61,8 +61,8 @@ pid_t shellui_find_pid(void) {
         }
         ptr += ki->ki_structsize;
 
-        if (ki->ki_comm && (strcmp(ki->ki_comm, "SceShellUI") == 0 ||
-                            strcmp(ki->ki_comm, "SceShellUI.elf") == 0)) {
+        if (strcmp(ki->ki_comm, "SceShellUI") == 0 ||
+            strcmp(ki->ki_comm, "SceShellUI.elf") == 0) {
             return ki->ki_pid;
         }
     }

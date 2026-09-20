@@ -105,6 +105,10 @@ int pt_setint(pid_t pid, intptr_t addr, int val) {
     return sys_ptrace(PT_WRITE_D, pid, (caddr_t)addr, val);
 }
 
+int pt_setlong(pid_t pid, intptr_t addr, long val) {
+    return pt_copyin(pid, &val, addr, sizeof(val));
+}
+
 long pt_call(pid_t pid, intptr_t addr, ...) {
     struct reg jmp_reg;
     struct reg bak_reg;
@@ -293,6 +297,7 @@ int pt_copyin(pid_t pid, const void* buf, intptr_t addr, size_t len) { (void)pid
 int pt_copyout(pid_t pid, intptr_t addr, void* buf, size_t len) { (void)pid; (void)addr; (void)buf; (void)len; return -1; }
 int pt_getint(pid_t pid, intptr_t addr) { (void)pid; (void)addr; return 0; }
 int pt_setint(pid_t pid, intptr_t addr, int val) { (void)pid; (void)addr; (void)val; return 0; }
+int pt_setlong(pid_t pid, intptr_t addr, long val) { (void)pid; (void)addr; (void)val; return 0; }
 long pt_call(pid_t pid, intptr_t addr, ...) { (void)pid; (void)addr; return 0; }
 long pt_call2(pid_t pid, intptr_t addr, ...) { (void)pid; (void)addr; return 0; }
 long pt_syscall(pid_t pid, int sysno, ...) { (void)pid; (void)sysno; return 0; }
