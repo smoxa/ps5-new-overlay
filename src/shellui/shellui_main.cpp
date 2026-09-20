@@ -246,6 +246,15 @@ static MonoObject* create_ui_font(MonoImage* pui_img, MonoDomain* domain, int si
     return unboxed;
 }
 
+static void widget_append_child(MonoClass* widget_class, MonoObject* parent, MonoObject* child) {
+    if (!widget_class || !parent || !child) return;
+    MonoMethod* append_child = mono_class_get_method_from_name(widget_class, "AppendChild", 1);
+    if (append_child) {
+        void* args[1] = { child };
+        mono_runtime_invoke(append_child, parent, args, nullptr);
+    }
+}
+
 static MonoObject* create_hud_item(MonoDomain* domain, MonoImage* pui_img,
                                    MonoClass* widget_class, MonoClass* panel_class, MonoClass* label_class,
                                    MonoObject* root, const char* name, float x, float y,
@@ -295,15 +304,6 @@ static MonoObject* create_hud_item(MonoDomain* domain, MonoImage* pui_img,
 
     widget_append_child(widget_class, cell, label);
     return label;
-}
-
-static void widget_append_child(MonoClass* widget_class, MonoObject* parent, MonoObject* child) {
-    if (!widget_class || !parent || !child) return;
-    MonoMethod* append_child = mono_class_get_method_from_name(widget_class, "AppendChild", 1);
-    if (append_child) {
-        void* args[1] = { child };
-        mono_runtime_invoke(append_child, parent, args, nullptr);
-    }
 }
 #endif
 

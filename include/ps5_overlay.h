@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define PS5_OVERLAY_VERSION "1.0.7"
+#define PS5_OVERLAY_VERSION "1.0.8"
 #define PS5_OVERLAY_DEFAULT_CONFIG_PATH "/data/ps5_overlay/config.ini"
 
 #ifdef __cplusplus
