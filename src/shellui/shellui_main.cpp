@@ -120,7 +120,40 @@ static MonoImage* load_system_dll(MonoDomain* domain, const char* dll_name) {
     return mono_assembly_get_image(assm);
 }
 
-/* Thunk-compiled direct property setter (used in onionHEN) */
+/* Patch Sony's UI thread check so our background thread can freely manipulate PUI widgets */
+static void patch_main_thread_check(MonoDomain* domain) {
+    MonoImage* core_img = load_system_dll(domain, "Sce.PlayStation.Core.dll");
+    if (!core_img) {
+        log_shellui("[SHELLUI] Sce.PlayStation.Core.dll not found\n");
+        return;
+    }
+    MonoClass* diag_class = mono_class_from_name(core_img, "Sce.PlayStation.Core.Runtime", "Diagnostics");
+    if (!diag_class) {
+        log_shellui("[SHELLUI] Diagnostics class not found\n");
+        return;
+    }
+    MonoMethod* check_method = mono_class_get_method_from_name(diag_class, "CheckRunningOnMainThread", 0);
+    if (!check_method) {
+        log_shellui("[SHELLUI] CheckRunningOnMainThread method not found\n");
+        return;
+    }
+    uint64_t real_addr = (uint64_t)mono_compile_method(check_method);
+    if (!real_addr) {
+        log_shellui("[SHELLUI] Failed to compile CheckRunningOnMainThread\n");
+        return;
+    }
+
+    uint64_t page_addr = real_addr & ~0x3FFFULL;
+    if (kernel_mprotect(-1, page_addr, 0x4000, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+        *(volatile uint8_t*)real_addr = 0xC3; // x86 'ret'
+        kernel_mprotect(-1, page_addr, 0x4000, PROT_READ | PROT_EXEC);
+        log_shellui("[SHELLUI] CheckRunningOnMainThread successfully patched with RET!\n");
+    } else {
+        log_shellui("[SHELLUI] kernel_mprotect failed for CheckRunningOnMainThread patch\n");
+    }
+}
+
+/* Thunk-compiled direct property setter (as used in onionHEN) */
 template <typename Param>
 static void Set_Property(MonoClass* Klass, MonoObject* Instance, const char* Property_Name, Param Value)
 {
@@ -135,7 +168,7 @@ static void Set_Property(MonoClass* Klass, MonoObject* Instance, const char* Pro
     Method(Instance, Value);
 }
 
-/* Property setter via runtime invoke for object references (used in onionHEN) */
+/* Property setter via runtime invoke for object references */
 template <typename Param>
 static void Set_Property_Invoke(MonoClass* Klass, MonoObject* Instance, const char* Property_Name, Param Value)
 {
@@ -242,7 +275,10 @@ int main(int argc, const char* argv[]) {
     mono_thread_attach(domain);
     log_shellui("[SHELLUI] Attached to Mono root domain: %p\n", domain);
 
-    /* 2. Load assemblies */
+    /* 2. Patch Sony's MainThread check so background UI modifications succeed */
+    patch_main_thread_check(domain);
+
+    /* 3. Load assemblies */
     MonoImage* pui_img = nullptr;
     MonoImage* app_system_img = nullptr;
     while (!pui_img || !app_system_img) {
@@ -255,7 +291,7 @@ int main(int argc, const char* argv[]) {
     }
     log_shellui("[SHELLUI] Loaded PUI (%p) and AppSystem (%p)\n", pui_img, app_system_img);
 
-    /* 3. Get classes and methods */
+    /* 4. Get classes and methods */
     MonoClass* layer_mgr_class = mono_class_from_name(app_system_img, "Sce.Vsh.ShellUI.AppSystem", "LayerManager");
     MonoClass* scene_class = mono_class_from_name(pui_img, "Sce.PlayStation.PUI.UI2", "Scene");
     MonoClass* widget_class = mono_class_from_name(pui_img, "Sce.PlayStation.PUI.UI2", "Widget");
@@ -315,7 +351,7 @@ int main(int argc, const char* argv[]) {
                 Set_Property(panel_class, bg_panel, "X", 0.0f);
                 Set_Property(panel_class, bg_panel, "Y", 0.0f);
                 Set_Property(panel_class, bg_panel, "Width", 1920.0f);
-                Set_Property(panel_class, bg_panel, "Height", 32.0f);
+                Set_Property(panel_class, bg_panel, "Height", 34.0f);
 
                 MonoObject* bg_color = create_ui_color(pui_img, domain, 0.0f, 0.0f, 0.0f, 0.70f);
                 if (bg_color) {
@@ -368,6 +404,14 @@ int main(int argc, const char* argv[]) {
 
                 widget_append_child(widget_class, root_widget, fan_lbl);
                 widget_append_child(widget_class, root_widget, fan_val);
+
+                /* Center test label requested by user */
+                MonoObject* center_font = create_ui_font(pui_img, domain, 36, 1, 900);
+                MonoObject* center_lbl = create_hud_label(domain, pui_img, label_class, "id_center_test",
+                                                          640.0f, 480.0f, "PS5 OVERLAY ACTIVE",
+                                                          center_font, 1.0f, 0.90f, 0.0f);
+                widget_append_child(widget_class, root_widget, center_lbl);
+                log_shellui("[SHELLUI] Center test banner added!\n");
 
                 last_attached_scene = game_scene;
                 attached_to_game = true;

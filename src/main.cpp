@@ -71,26 +71,23 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[WARNING] Overlay UI init returned false; proceeding with fallback.\n");
     }
 
-    /* Inject in-game overlay into SceShellUI if not already active */
+    /* Inject in-game overlay into SceShellUI */
     bool hud_injected = false;
-    /* Inject in-game overlay into SceShellUI if not already active */
     if (!test_mode) {
-        if (shellui_is_injected()) {
-            printf("[STATUS] SceShellUI in-game HUD already active.\n");
-            hud_injected = true;
-        } else {
-            pid_t shellui_pid = shellui_find_pid();
-            if (shellui_pid > 0) {
-                printf("[STATUS] Found SceShellUI (PID: %d). Injecting in-game overlay...\n", shellui_pid);
-                if (shellui_inject_elf(shellui_pid, g_overlay_shellui_elf, g_overlay_shellui_elf_size)) {
-                    printf("[STATUS] Successfully injected HUD into SceShellUI!\n");
-                    hud_injected = true;
-                } else {
-                    fprintf(stderr, "[WARNING] Failed to inject HUD into SceShellUI.\n");
-                }
+        unlink("/system_tmp/ps5_overlay_ready");
+        unlink("/system_tmp/ps5_overlay.log");
+
+        pid_t shellui_pid = shellui_find_pid();
+        if (shellui_pid > 0) {
+            printf("[STATUS] Found SceShellUI (PID: %d). Injecting in-game overlay...\n", shellui_pid);
+            if (shellui_inject_elf(shellui_pid, g_overlay_shellui_elf, g_overlay_shellui_elf_size)) {
+                printf("[STATUS] Successfully injected HUD into SceShellUI!\n");
+                hud_injected = true;
             } else {
-                fprintf(stderr, "[WARNING] SceShellUI process not found.\n");
+                fprintf(stderr, "[WARNING] Failed to inject HUD into SceShellUI.\n");
             }
+        } else {
+            fprintf(stderr, "[WARNING] SceShellUI process not found.\n");
         }
     }
 
