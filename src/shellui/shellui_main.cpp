@@ -72,6 +72,7 @@ static int (*sys_sceKernelGetCpuTemperature)(int* cputemp) = nullptr;
 static int (*sys_sceKernelGetSocSensorTemperature)(int sensorId, int* soctime) = nullptr;
 static int (*sys_sceKernelGetCurrentFanDuty)(uint16_t* duty, uint64_t* chassis) = nullptr;
 static int (*sys_sceKernelMprotect)(void* addr, size_t len, int prot) = nullptr;
+static int (*sys_get_page_table_stats)(int vm, int type, int* total, int* free) = nullptr;
 
 #define KERNEL_DLSYM(handle, sym) \
     (*(void**)&sym = (void*)kernel_dynlib_dlsym(-1, handle, #sym))
@@ -116,6 +117,7 @@ static bool resolve_mono_symbols(void) {
     sys_sceKernelGetSocSensorTemperature = (int(*)(int, int*))kernel_dynlib_dlsym(-1, libkernel, "sceKernelGetSocSensorTemperature");
     sys_sceKernelGetCurrentFanDuty = (int(*)(uint16_t*, uint64_t*))kernel_dynlib_dlsym(-1, libkernel, "sceKernelGetCurrentFanDuty");
     sys_sceKernelMprotect = (int(*)(void*, size_t, int))kernel_dynlib_dlsym(-1, libkernel, "sceKernelMprotect");
+    sys_get_page_table_stats = (int(*)(int, int, int*, int*))kernel_dynlib_dlsym(-1, libkernel, "get_page_table_stats");
 
     bool ok = (mono_get_root_domain && mono_thread_attach && mono_class_from_name && mono_compile_method);
     log_shellui("[SHELLUI] resolve_mono_symbols result: %s\n", ok ? "SUCCESS" : "FAILED");
@@ -244,19 +246,37 @@ static MonoObject* create_ui_font(MonoImage* pui_img, MonoDomain* domain, int si
     return unboxed;
 }
 
-static MonoObject* create_hud_label(MonoDomain* domain, MonoImage* pui_img, MonoClass* label_class,
-                                    const char* name, float x, float y, const char* text,
-                                    MonoObject* font, float r, float g, float b, float a = 1.0f) {
+static MonoObject* create_hud_item(MonoDomain* domain, MonoImage* pui_img,
+                                   MonoClass* widget_class, MonoClass* panel_class, MonoClass* label_class,
+                                   MonoObject* root, const char* name, float x, float y,
+                                   const char* text, MonoObject* font,
+                                   float r, float g, float b, float a = 1.0f) {
+    /* 1. Container cell (Panel) positioned at (X = x, Y = 0) */
+    MonoObject* cell = mono_object_new(domain, panel_class);
+    if (!cell) return nullptr;
+    mono_runtime_object_init(cell);
+
+    char cell_name[96];
+    snprintf(cell_name, sizeof(cell_name), "%s_cell", name);
+    Set_Property(panel_class, cell, "Name", mono_string_new(domain, cell_name));
+    Set_Property(panel_class, cell, "X", x);
+    Set_Property(panel_class, cell, "Y", 0.0f);
+    Set_Property(panel_class, cell, "Width", 300.0f);
+    Set_Property(panel_class, cell, "Height", 34.0f);
+    Set_Property(panel_class, cell, "BackgroundVisibility", false);
+    widget_append_child(widget_class, root, cell);
+
+    /* 2. Label inside container cell */
     MonoObject* label = mono_object_new(domain, label_class);
     if (!label) return nullptr;
     mono_runtime_object_init(label);
 
     Set_Property(label_class, label, "Name", mono_string_new(domain, name));
     Set_Property(label_class, label, "PositionType", 1);
-    Set_Property(label_class, label, "MarginLeft", x);
+    Set_Property(label_class, label, "MarginLeft", 0.0f);
     Set_Property(label_class, label, "MarginTop", y);
-    Set_Property(label_class, label, "Width", 500.0f);
-    Set_Property(label_class, label, "Height", 40.0f);
+    Set_Property(label_class, label, "Width", 300.0f);
+    Set_Property(label_class, label, "Height", 34.0f);
     Set_Property(label_class, label, "Text", mono_string_new(domain, text));
     if (font) {
         Set_Property_Invoke(label_class, label, "Font", font);
@@ -273,6 +293,7 @@ static MonoObject* create_hud_label(MonoDomain* domain, MonoImage* pui_img, Mono
         Set_Property_Invoke(label_class, label, "TextColor", text_color);
     }
 
+    widget_append_child(widget_class, cell, label);
     return label;
 }
 
@@ -404,50 +425,34 @@ int main(int argc, const char* argv[]) {
                 float y = 5.0f;
 
                 // CPU: #66FF66
-                MonoObject* cpu_lbl = create_hud_label(domain, pui_img, label_class, "id_cpu_lbl", 24.0f, y, "CPU", hud_font, 102.0f/255.0f, 1.0f, 102.0f/255.0f);
-                cpu_val = create_hud_label(domain, pui_img, label_class, "id_cpu_val", 70.0f, y, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
-                MonoObject* sep1    = create_hud_label(domain, pui_img, label_class, "id_sep1", 136.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
+                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                "id_cpu_lbl", 24.0f, y, "CPU", hud_font, 102.0f/255.0f, 1.0f, 102.0f/255.0f);
+                cpu_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                          "id_cpu_val", 72.0f, y, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
+                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                "id_sep1", 138.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
 
                 // GPU: #B366FF
-                MonoObject* gpu_lbl = create_hud_label(domain, pui_img, label_class, "id_gpu_lbl", 156.0f, y, "GPU", hud_font, 179.0f/255.0f, 102.0f/255.0f, 1.0f);
-                gpu_val = create_hud_label(domain, pui_img, label_class, "id_gpu_val", 204.0f, y, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
-                MonoObject* sep2    = create_hud_label(domain, pui_img, label_class, "id_sep2", 270.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
+                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                "id_gpu_lbl", 158.0f, y, "GPU", hud_font, 179.0f/255.0f, 102.0f/255.0f, 1.0f);
+                gpu_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                          "id_gpu_val", 206.0f, y, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
+                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                "id_sep2", 270.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
 
                 // RAM: #FFB34D
-                MonoObject* ram_lbl = create_hud_label(domain, pui_img, label_class, "id_ram_lbl", 290.0f, y, "RAM", hud_font, 1.0f, 179.0f/255.0f, 77.0f/255.0f);
-                ram_val = create_hud_label(domain, pui_img, label_class, "id_ram_val", 340.0f, y, "N/A", hud_font, 1.0f, 1.0f, 1.0f);
-                MonoObject* sep3    = create_hud_label(domain, pui_img, label_class, "id_sep3", 440.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
+                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                "id_ram_lbl", 290.0f, y, "RAM", hud_font, 1.0f, 179.0f/255.0f, 77.0f/255.0f);
+                ram_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                          "id_ram_val", 344.0f, y, "-- GB", hud_font, 1.0f, 1.0f, 1.0f);
+                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                "id_sep3", 452.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
 
                 // FAN: #33E0FF
-                MonoObject* fan_lbl = create_hud_label(domain, pui_img, label_class, "id_fan_lbl", 460.0f, y, "FAN", hud_font, 51.0f/255.0f, 224.0f/255.0f, 1.0f);
-                fan_val = create_hud_label(domain, pui_img, label_class, "id_fan_val", 506.0f, y, "--%", hud_font, 1.0f, 1.0f, 1.0f);
-
-                widget_append_child(widget_class, root_widget, cpu_lbl);
-                widget_append_child(widget_class, root_widget, cpu_val);
-                widget_append_child(widget_class, root_widget, sep1);
-
-                widget_append_child(widget_class, root_widget, gpu_lbl);
-                widget_append_child(widget_class, root_widget, gpu_val);
-                widget_append_child(widget_class, root_widget, sep2);
-
-                widget_append_child(widget_class, root_widget, ram_lbl);
-                widget_append_child(widget_class, root_widget, ram_val);
-                widget_append_child(widget_class, root_widget, sep3);
-
-                widget_append_child(widget_class, root_widget, fan_lbl);
-                widget_append_child(widget_class, root_widget, fan_val);
-
-                /* Center test label requested by user */
-                MonoObject* center_font = create_ui_font(pui_img, domain, 36, 1, 900);
-                MonoObject* center_lbl = create_hud_label(domain, pui_img, label_class, "id_center_test",
-                                                          640.0f, 480.0f, "PS5 OVERLAY ACTIVE",
-                                                          center_font, 1.0f, 0.90f, 0.0f);
-                if (center_lbl) {
-                    Set_Property(label_class, center_lbl, "Width", 800.0f);
-                    Set_Property(label_class, center_lbl, "Height", 80.0f);
-                    widget_append_child(widget_class, root_widget, center_lbl);
-                    log_shellui("[SHELLUI] Center test banner added!\n");
-                }
+                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                "id_fan_lbl", 472.0f, y, "FAN", hud_font, 51.0f/255.0f, 224.0f/255.0f, 1.0f);
+                fan_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
+                                          "id_fan_val", 518.0f, y, "--%", hud_font, 1.0f, 1.0f, 1.0f);
 
                 last_attached_scene = game_scene;
                 attached_to_game = true;
@@ -488,6 +493,17 @@ int main(int argc, const char* argv[]) {
             if (gpu_val) {
                 snprintf(buf, sizeof(buf), "%d°C", gpu_temp);
                 Set_Property(label_class, gpu_val, "Text", mono_string_new(domain, buf));
+            }
+
+            if (ram_val) {
+                int ram_total = 0, ram_free = 0;
+                if (sys_get_page_table_stats && sys_get_page_table_stats(1, 1, &ram_total, &ram_free) == 0 && ram_total > 0) {
+                    int used_mb = ram_total - ram_free;
+                    snprintf(buf, sizeof(buf), "%.1f/16 GB", (float)used_mb / 1024.0f);
+                } else {
+                    snprintf(buf, sizeof(buf), "N/A");
+                }
+                Set_Property(label_class, ram_val, "Text", mono_string_new(domain, buf));
             }
 
             if (fan_val) {
