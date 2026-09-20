@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdarg.h>
+#include <cmath>
 
 #if defined(__PS5__) || defined(PS5)
 #include <ps5/kernel.h>
@@ -103,7 +104,7 @@ static bool resolve_mono_symbols(void) {
     sys_sceKernelGetSocSensorTemperature = (int(*)(int, int*))kernel_dynlib_dlsym(-1, libkernel, "sceKernelGetSocSensorTemperature");
     sys_sceKernelGetCurrentFanDuty = (int(*)(uint16_t*, uint64_t*))kernel_dynlib_dlsym(-1, libkernel, "sceKernelGetCurrentFanDuty");
 
-    bool ok = (mono_get_root_domain && mono_thread_attach && mono_class_from_name);
+    bool ok = (mono_get_root_domain && mono_thread_attach && mono_class_from_name && mono_compile_method);
     log_shellui("[SHELLUI] resolve_mono_symbols result: %s\n", ok ? "SUCCESS" : "FAILED");
     return ok;
 }
@@ -119,62 +120,45 @@ static MonoImage* load_system_dll(MonoDomain* domain, const char* dll_name) {
     return mono_assembly_get_image(assm);
 }
 
-static MonoObject* invoke_method(MonoMethod* method, void* obj, void** params) {
-    if (!method || !mono_runtime_invoke) return nullptr;
-    MonoObject* exc = nullptr;
-    return mono_runtime_invoke(method, obj, params, &exc);
+/* Thunk-compiled direct property setter (used in onionHEN) */
+template <typename Param>
+static void Set_Property(MonoClass* Klass, MonoObject* Instance, const char* Property_Name, Param Value)
+{
+    if (!Klass || !Instance) return;
+    MonoProperty* Prop = mono_class_get_property_from_name(Klass, Property_Name);
+    if (!Prop) return;
+    MonoMethod* Set_Method = mono_property_get_set_method(Prop);
+    if (!Set_Method) return;
+    uint64_t Thunk = (uint64_t)mono_compile_method(Set_Method);
+    if (!Thunk) return;
+    void(*Method)(MonoObject*, Param) = (void(*)(MonoObject*, Param))Thunk;
+    Method(Instance, Value);
 }
 
-static void set_property_string(MonoDomain* domain, MonoClass* cls, MonoObject* obj, const char* prop_name, const char* val) {
-    if (!cls || !obj) return;
-    MonoProperty* prop = mono_class_get_property_from_name(cls, prop_name);
-    if (!prop) return;
-    MonoMethod* setter = mono_property_get_set_method(prop);
-    if (!setter) return;
-    MonoString* str = mono_string_new(domain, val);
-    void* args[1] = { str };
-    invoke_method(setter, obj, args);
+/* Property setter via runtime invoke for object references (used in onionHEN) */
+template <typename Param>
+static void Set_Property_Invoke(MonoClass* Klass, MonoObject* Instance, const char* Property_Name, Param Value)
+{
+    if (!Klass || !Instance) return;
+    MonoProperty* Prop = mono_class_get_property_from_name(Klass, Property_Name);
+    if (!Prop) return;
+    MonoMethod* Set_Method = mono_property_get_set_method(Prop);
+    if (!Set_Method) return;
+    void* args[1] = { (void*)Value };
+    mono_runtime_invoke(Set_Method, Instance, args, nullptr);
 }
 
-static void set_property_float(MonoClass* cls, MonoObject* obj, const char* prop_name, float val) {
-    if (!cls || !obj) return;
-    MonoProperty* prop = mono_class_get_property_from_name(cls, prop_name);
-    if (!prop) return;
-    MonoMethod* setter = mono_property_get_set_method(prop);
-    if (!setter) return;
-    void* args[1] = { &val };
-    invoke_method(setter, obj, args);
-}
-
-static void set_property_bool(MonoClass* cls, MonoObject* obj, const char* prop_name, bool val) {
-    if (!cls || !obj) return;
-    MonoProperty* prop = mono_class_get_property_from_name(cls, prop_name);
-    if (!prop) return;
-    MonoMethod* setter = mono_property_get_set_method(prop);
-    if (!setter) return;
-    uint32_t bval = val ? 1 : 0;
-    void* args[1] = { &bval };
-    invoke_method(setter, obj, args);
-}
-
-static void set_property_int(MonoClass* cls, MonoObject* obj, const char* prop_name, int val) {
-    if (!cls || !obj) return;
-    MonoProperty* prop = mono_class_get_property_from_name(cls, prop_name);
-    if (!prop) return;
-    MonoMethod* setter = mono_property_get_set_method(prop);
-    if (!setter) return;
-    void* args[1] = { &val };
-    invoke_method(setter, obj, args);
-}
-
-static void set_property_object(MonoClass* cls, MonoObject* obj, const char* prop_name, MonoObject* val) {
-    if (!cls || !obj) return;
-    MonoProperty* prop = mono_class_get_property_from_name(cls, prop_name);
-    if (!prop) return;
-    MonoMethod* setter = mono_property_get_set_method(prop);
-    if (!setter) return;
-    void* args[1] = { val };
-    invoke_method(setter, obj, args);
+/* Thunk-compiled constructor caller for unboxed value types */
+template <typename... Args>
+static void Invoke_Ctor(MonoClass* klass, MonoObject* instance, Args... args)
+{
+    int count = sizeof...(args);
+    MonoMethod* method = mono_class_get_method_from_name(klass, ".ctor", count);
+    if (!method) return;
+    uint64_t thunk = (uint64_t)mono_compile_method(method);
+    if (!thunk) return;
+    void(*fn)(MonoObject*, Args...) = (void(*)(MonoObject*, Args...))thunk;
+    fn(instance, args...);
 }
 
 static MonoObject* create_ui_color(MonoImage* pui_img, MonoDomain* domain, float r, float g, float b, float a) {
@@ -183,12 +167,8 @@ static MonoObject* create_ui_color(MonoImage* pui_img, MonoDomain* domain, float
     MonoObject* inst = mono_object_new(domain, col_class);
     if (!inst) return nullptr;
     MonoObject* unboxed = (MonoObject*)mono_object_unbox(inst);
-    MonoMethod* ctor = mono_class_get_method_from_name(col_class, ".ctor", 4);
-    if (ctor) {
-        void* args[4] = { &r, &g, &b, &a };
-        invoke_method(ctor, unboxed, args);
-    }
-    return unboxed ? unboxed : inst;
+    Invoke_Ctor(col_class, unboxed, r, g, b, a);
+    return unboxed;
 }
 
 static MonoObject* create_ui_font(MonoImage* pui_img, MonoDomain* domain, int size, int style, int weight) {
@@ -197,50 +177,46 @@ static MonoObject* create_ui_font(MonoImage* pui_img, MonoDomain* domain, int si
     MonoObject* inst = mono_object_new(domain, font_class);
     if (!inst) return nullptr;
     MonoObject* unboxed = (MonoObject*)mono_object_unbox(inst);
-    MonoMethod* ctor = mono_class_get_method_from_name(font_class, ".ctor", 3);
-    if (ctor) {
-        void* args[3] = { &size, &style, &weight };
-        invoke_method(ctor, unboxed, args);
-    }
-    return unboxed ? unboxed : inst;
+    Invoke_Ctor(font_class, unboxed, size, style, weight);
+    return unboxed;
 }
 
 static MonoObject* create_hud_label(MonoDomain* domain, MonoImage* pui_img, MonoClass* label_class,
-                                    const char* name, float x, const char* text,
-                                    MonoObject* font, float r, float g, float b) {
+                                    const char* name, float x, float y, const char* text,
+                                    MonoObject* font, float r, float g, float b, float a = 1.0f) {
     MonoObject* label = mono_object_new(domain, label_class);
     if (!label) return nullptr;
     mono_runtime_object_init(label);
 
-    set_property_string(domain, label_class, label, "Name", name);
-    set_property_int(label_class, label, "PositionType", 1);
-    set_property_float(label_class, label, "MarginLeft", x);
-    set_property_float(label_class, label, "MarginTop", 5.0f);
-    set_property_string(domain, label_class, label, "Text", text);
+    Set_Property(label_class, label, "Name", mono_string_new(domain, name));
+    Set_Property(label_class, label, "PositionType", 1);
+    Set_Property(label_class, label, "MarginLeft", x);
+    Set_Property(label_class, label, "MarginTop", y);
+    Set_Property(label_class, label, "Text", mono_string_new(domain, text));
     if (font) {
-        set_property_object(label_class, label, "Font", font);
+        Set_Property_Invoke(label_class, label, "Font", font);
     }
-    set_property_int(label_class, label, "HorizontalAlignment", 0);
-    set_property_int(label_class, label, "VerticalAlignment", 0);
-    set_property_bool(label_class, label, "FitWidthToText", true);
-    set_property_bool(label_class, label, "FitHeightToText", true);
-    set_property_int(label_class, label, "NumberOfLines", 1);
-    set_property_bool(label_class, label, "EnableThemedTextShadow", true);
+    Set_Property(label_class, label, "HorizontalAlignment", 0);
+    Set_Property(label_class, label, "VerticalAlignment", 0);
+    Set_Property(label_class, label, "FitWidthToText", false);
+    Set_Property(label_class, label, "FitHeightToText", true);
+    Set_Property(label_class, label, "NumberOfLines", 1);
+    Set_Property(label_class, label, "EnableThemedTextShadow", true);
 
-    MonoObject* text_color = create_ui_color(pui_img, domain, r, g, b, 1.0f);
+    MonoObject* text_color = create_ui_color(pui_img, domain, r, g, b, a);
     if (text_color) {
-        set_property_object(label_class, label, "TextColor", text_color);
+        Set_Property_Invoke(label_class, label, "TextColor", text_color);
     }
 
     return label;
 }
 
-static void append_widget(MonoClass* widget_class, MonoObject* parent, MonoObject* child) {
+static void widget_append_child(MonoClass* widget_class, MonoObject* parent, MonoObject* child) {
     if (!widget_class || !parent || !child) return;
     MonoMethod* append_child = mono_class_get_method_from_name(widget_class, "AppendChild", 1);
     if (append_child) {
         void* args[1] = { child };
-        invoke_method(append_child, parent, args);
+        mono_runtime_invoke(append_child, parent, args, nullptr);
     }
 }
 #endif
@@ -309,7 +285,7 @@ int main(int argc, const char* argv[]) {
 
     log_shellui("[SHELLUI] Overlay ready! Entering game monitoring loop...\n");
 
-    MonoObject* hud_panel = nullptr;
+    MonoObject* bg_panel = nullptr;
     MonoObject* cpu_val = nullptr;
     MonoObject* gpu_val = nullptr;
     MonoObject* ram_val = nullptr;
@@ -321,75 +297,81 @@ int main(int argc, const char* argv[]) {
     while (true) {
         MonoString* game_str = mono_string_new(domain, "Game");
         void* scene_args[1] = { game_str };
-        MonoObject* game_scene = invoke_method(find_scene, nullptr, scene_args);
+        MonoObject* exc = nullptr;
+        MonoObject* game_scene = mono_runtime_invoke(find_scene, nullptr, scene_args, &exc);
 
         if (game_scene && game_scene != last_attached_scene) {
             log_shellui("[SHELLUI] Found active Game container scene: %p\n", game_scene);
-            MonoObject* root_widget = invoke_method(get_root, game_scene, nullptr);
+            MonoObject* root_widget = mono_runtime_invoke(get_root, game_scene, nullptr, &exc);
 
             if (root_widget) {
                 log_shellui("[SHELLUI] Game RootWidget: %p. Creating HUD widgets...\n", root_widget);
 
-                /* Create HUD panel */
-                hud_panel = mono_object_new(domain, panel_class);
-                mono_runtime_object_init(hud_panel);
+                /* Create HUD background panel */
+                bg_panel = mono_object_new(domain, panel_class);
+                mono_runtime_object_init(bg_panel);
 
-                set_property_string(domain, panel_class, hud_panel, "Name", "ps5_in_game_hud_panel");
-                set_property_float(panel_class, hud_panel, "X", 0.0f);
-                set_property_float(panel_class, hud_panel, "Y", 0.0f);
-                set_property_float(panel_class, hud_panel, "Width", 1920.0f);
-                set_property_float(panel_class, hud_panel, "Height", 34.0f);
-                set_property_bool(panel_class, hud_panel, "BackgroundVisibility", true);
-                set_property_float(panel_class, hud_panel, "BackgroundOpacity", 0.72f);
-                set_property_int(panel_class, hud_panel, "BackgroundStyle", 1);
+                Set_Property(panel_class, bg_panel, "Name", mono_string_new(domain, "id_onion_overlay_bg"));
+                Set_Property(panel_class, bg_panel, "X", 0.0f);
+                Set_Property(panel_class, bg_panel, "Y", 0.0f);
+                Set_Property(panel_class, bg_panel, "Width", 1920.0f);
+                Set_Property(panel_class, bg_panel, "Height", 32.0f);
 
-                MonoObject* bg_color = create_ui_color(pui_img, domain, 0.0f, 0.0f, 0.0f, 0.72f);
+                MonoObject* bg_color = create_ui_color(pui_img, domain, 0.0f, 0.0f, 0.0f, 0.70f);
                 if (bg_color) {
-                    set_property_object(panel_class, hud_panel, "BackgroundColor", bg_color);
+                    Set_Property_Invoke(panel_class, bg_panel, "BackgroundColor", bg_color);
                 }
 
+                Set_Property(panel_class, bg_panel, "BackgroundVisibility", true);
+                Set_Property(panel_class, bg_panel, "BackgroundOpacity", 1.0f);
+                Set_Property(panel_class, bg_panel, "BackgroundStyle", 1);
+
+                log_shellui("[SHELLUI] Background panel created. Appending to RootWidget...\n");
+                widget_append_child(widget_class, root_widget, bg_panel);
+
+                /* Font: 18pt, bold=1, weight=900 */
                 MonoObject* hud_font = create_ui_font(pui_img, domain, 18, 1, 900);
+                log_shellui("[SHELLUI] Font created: %p\n", hud_font);
 
-                // CPU
-                MonoObject* cpu_lbl = create_hud_label(domain, pui_img, label_class, "id_cpu_tag", 28.0f, "CPU", hud_font, 0.40f, 1.0f, 0.40f);
-                cpu_val = create_hud_label(domain, pui_img, label_class, "id_cpu_val", 72.0f, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
-                MonoObject* sep1    = create_hud_label(domain, pui_img, label_class, "id_sep1", 132.0f, "|", hud_font, 0.60f, 0.60f, 0.60f);
+                float y = 5.0f;
 
-                // GPU
-                MonoObject* gpu_lbl = create_hud_label(domain, pui_img, label_class, "id_gpu_tag", 152.0f, "GPU", hud_font, 0.70f, 0.40f, 1.0f);
-                gpu_val = create_hud_label(domain, pui_img, label_class, "id_gpu_val", 196.0f, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
-                MonoObject* sep2    = create_hud_label(domain, pui_img, label_class, "id_sep2", 256.0f, "|", hud_font, 0.60f, 0.60f, 0.60f);
+                // CPU: #66FF66
+                MonoObject* cpu_lbl = create_hud_label(domain, pui_img, label_class, "id_cpu_lbl", 24.0f, y, "CPU", hud_font, 102.0f/255.0f, 1.0f, 102.0f/255.0f);
+                cpu_val = create_hud_label(domain, pui_img, label_class, "id_cpu_val", 70.0f, y, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
+                MonoObject* sep1    = create_hud_label(domain, pui_img, label_class, "id_sep1", 136.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
 
-                // RAM
-                MonoObject* ram_lbl = create_hud_label(domain, pui_img, label_class, "id_ram_tag", 276.0f, "RAM", hud_font, 1.0f, 0.70f, 0.30f);
-                ram_val = create_hud_label(domain, pui_img, label_class, "id_ram_val", 324.0f, "N/A", hud_font, 1.0f, 1.0f, 1.0f);
-                MonoObject* sep3    = create_hud_label(domain, pui_img, label_class, "id_sep3", 420.0f, "|", hud_font, 0.60f, 0.60f, 0.60f);
+                // GPU: #B366FF
+                MonoObject* gpu_lbl = create_hud_label(domain, pui_img, label_class, "id_gpu_lbl", 156.0f, y, "GPU", hud_font, 179.0f/255.0f, 102.0f/255.0f, 1.0f);
+                gpu_val = create_hud_label(domain, pui_img, label_class, "id_gpu_val", 204.0f, y, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
+                MonoObject* sep2    = create_hud_label(domain, pui_img, label_class, "id_sep2", 270.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
 
-                // FAN
-                MonoObject* fan_lbl = create_hud_label(domain, pui_img, label_class, "id_fan_tag", 440.0f, "FAN", hud_font, 0.20f, 0.88f, 1.0f);
-                fan_val = create_hud_label(domain, pui_img, label_class, "id_fan_val", 486.0f, "--%", hud_font, 1.0f, 1.0f, 1.0f);
+                // RAM: #FFB34D
+                MonoObject* ram_lbl = create_hud_label(domain, pui_img, label_class, "id_ram_lbl", 290.0f, y, "RAM", hud_font, 1.0f, 179.0f/255.0f, 77.0f/255.0f);
+                ram_val = create_hud_label(domain, pui_img, label_class, "id_ram_val", 340.0f, y, "N/A", hud_font, 1.0f, 1.0f, 1.0f);
+                MonoObject* sep3    = create_hud_label(domain, pui_img, label_class, "id_sep3", 440.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
 
-                append_widget(widget_class, hud_panel, cpu_lbl);
-                append_widget(widget_class, hud_panel, cpu_val);
-                append_widget(widget_class, hud_panel, sep1);
+                // FAN: #33E0FF
+                MonoObject* fan_lbl = create_hud_label(domain, pui_img, label_class, "id_fan_lbl", 460.0f, y, "FAN", hud_font, 51.0f/255.0f, 224.0f/255.0f, 1.0f);
+                fan_val = create_hud_label(domain, pui_img, label_class, "id_fan_val", 506.0f, y, "--%", hud_font, 1.0f, 1.0f, 1.0f);
 
-                append_widget(widget_class, hud_panel, gpu_lbl);
-                append_widget(widget_class, hud_panel, gpu_val);
-                append_widget(widget_class, hud_panel, sep2);
+                widget_append_child(widget_class, root_widget, cpu_lbl);
+                widget_append_child(widget_class, root_widget, cpu_val);
+                widget_append_child(widget_class, root_widget, sep1);
 
-                append_widget(widget_class, hud_panel, ram_lbl);
-                append_widget(widget_class, hud_panel, ram_val);
-                append_widget(widget_class, hud_panel, sep3);
+                widget_append_child(widget_class, root_widget, gpu_lbl);
+                widget_append_child(widget_class, root_widget, gpu_val);
+                widget_append_child(widget_class, root_widget, sep2);
 
-                append_widget(widget_class, hud_panel, fan_lbl);
-                append_widget(widget_class, hud_panel, fan_val);
+                widget_append_child(widget_class, root_widget, ram_lbl);
+                widget_append_child(widget_class, root_widget, ram_val);
+                widget_append_child(widget_class, root_widget, sep3);
 
-                /* Attach to RootWidget */
-                append_widget(widget_class, root_widget, hud_panel);
+                widget_append_child(widget_class, root_widget, fan_lbl);
+                widget_append_child(widget_class, root_widget, fan_val);
 
                 last_attached_scene = game_scene;
                 attached_to_game = true;
-                log_shellui("[SHELLUI] HUD attached to Game Scene RootWidget!\n");
+                log_shellui("[SHELLUI] HUD attached to Game Scene RootWidget successfully!\n");
             }
         } else if (!game_scene && attached_to_game) {
             /* Game closed */
@@ -399,7 +381,7 @@ int main(int argc, const char* argv[]) {
         }
 
         /* Update metrics if attached */
-        if (attached_to_game && hud_panel) {
+        if (attached_to_game) {
             int cpu_temp = 0;
             if (sys_sceKernelGetCpuTemperature) {
                 sys_sceKernelGetCpuTemperature(&cpu_temp);
@@ -420,17 +402,17 @@ int main(int argc, const char* argv[]) {
             char buf[32];
             if (cpu_val) {
                 snprintf(buf, sizeof(buf), "%d°C", cpu_temp);
-                set_property_string(domain, label_class, cpu_val, "Text", buf);
+                Set_Property(label_class, cpu_val, "Text", mono_string_new(domain, buf));
             }
 
             if (gpu_val) {
                 snprintf(buf, sizeof(buf), "%d°C", gpu_temp);
-                set_property_string(domain, label_class, gpu_val, "Text", buf);
+                Set_Property(label_class, gpu_val, "Text", mono_string_new(domain, buf));
             }
 
             if (fan_val) {
                 snprintf(buf, sizeof(buf), "%.0f%%", fan_pct);
-                set_property_string(domain, label_class, fan_val, "Text", buf);
+                Set_Property(label_class, fan_val, "Text", mono_string_new(domain, buf));
             }
         }
 
