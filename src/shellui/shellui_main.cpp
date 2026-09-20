@@ -8,11 +8,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdarg.h>
 #include <cmath>
+
+#ifndef O_RDONLY
+#define O_RDONLY 0x0000
+#endif
 
 #if defined(__PS5__) || defined(PS5)
 #include <sys/mman.h>

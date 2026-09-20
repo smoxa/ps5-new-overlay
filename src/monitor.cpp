@@ -6,7 +6,16 @@
 
 #if defined(__PS5__) || defined(PS5)
 #include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/ioctl.h>
+
+#ifndef O_RDONLY
+#define O_RDONLY 0x0000
+#endif
+#ifndef O_RDWR
+#define O_RDWR 0x0002
+#endif
 
 struct OrbisKernelTimespec {
     int64_t tv_sec;
