@@ -265,3 +265,78 @@ void monitor_format_hud_string(const HardwareMetrics* m, const OverlayConfig* cf
         strncat(buffer, item, max_len - strlen(buffer) - 1);
     }
 }
+
+void monitor_format_hud_lines(const HardwareMetrics* m, const OverlayConfig* cfg,
+                              char* line1, size_t line1_len, char* line2, size_t line2_len) {
+    if (!m || !cfg) return;
+
+    /* Line 1: CPU and GPU metrics */
+    if (line1 && line1_len > 0) {
+        line1[0] = '\0';
+        char item[128];
+        bool first = true;
+
+        auto append_sep1 = [&]() {
+            if (!first) strncat(line1, "  |  ", line1_len - strlen(line1) - 1);
+            first = false;
+        };
+
+        if (cfg->show_cpu_temp || cfg->show_cpu_load) {
+            append_sep1();
+            strncat(line1, "CPU: ", line1_len - strlen(line1) - 1);
+            if (cfg->show_cpu_temp) {
+                snprintf(item, sizeof(item), "%d°C", m->cpu_temp);
+                strncat(line1, item, line1_len - strlen(line1) - 1);
+            }
+            if (cfg->show_cpu_load) {
+                if (cfg->show_cpu_temp) strncat(line1, " ", line1_len - strlen(line1) - 1);
+                snprintf(item, sizeof(item), "(%.0f%%)", m->cpu_usage);
+                strncat(line1, item, line1_len - strlen(line1) - 1);
+            }
+        }
+
+        if (cfg->show_gpu_temp || cfg->show_gpu_load) {
+            append_sep1();
+            strncat(line1, "GPU: ", line1_len - strlen(line1) - 1);
+            if (cfg->show_gpu_temp) {
+                snprintf(item, sizeof(item), "%d°C", m->soc_temp);
+                strncat(line1, item, line1_len - strlen(line1) - 1);
+            }
+            if (cfg->show_gpu_load) {
+                if (cfg->show_gpu_temp) strncat(line1, " ", line1_len - strlen(line1) - 1);
+                snprintf(item, sizeof(item), "(%.0f%%)", m->vram_percentage);
+                strncat(line1, item, line1_len - strlen(line1) - 1);
+            }
+        }
+    }
+
+    /* Line 2: RAM and Fan metrics */
+    if (line2 && line2_len > 0) {
+        line2[0] = '\0';
+        char item[128];
+        bool first = true;
+
+        auto append_sep2 = [&]() {
+            if (!first) strncat(line2, "  |  ", line2_len - strlen(line2) - 1);
+            first = false;
+        };
+
+        if (cfg->show_ram) {
+            append_sep2();
+            if (m->ram_total_mb > 0) {
+                float used_gb = (float)m->ram_used_mb / 1024.0f;
+                float total_gb = (float)m->ram_total_mb / 1024.0f;
+                snprintf(item, sizeof(item), "RAM: %.1f/%.1f GB (%.0f%%)", used_gb, total_gb, m->ram_percentage);
+            } else {
+                snprintf(item, sizeof(item), "RAM: %d MB", m->ram_used_mb);
+            }
+            strncat(line2, item, line2_len - strlen(line2) - 1);
+        }
+
+        if (cfg->show_fan) {
+            append_sep2();
+            snprintf(item, sizeof(item), "FAN: %d%%", m->fan_duty_percent);
+            strncat(line2, item, line2_len - strlen(line2) - 1);
+        }
+    }
+}

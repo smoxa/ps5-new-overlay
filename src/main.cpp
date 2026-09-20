@@ -3,6 +3,7 @@
 #include "overlay_ui.h"
 #include "notify.h"
 #include "config.h"
+#include "web_server.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -68,32 +69,52 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[WARNING] Overlay UI init returned false; proceeding with fallback.\n");
     }
 
-    /* Send startup notification toast */
-    notify_send_fmt("PS5 Overlay v%s Started!\nCPU/GPU & Memory HUD Active", PS5_OVERLAY_VERSION);
+    /* Start embedded Web HUD server */
+    if (config.web_server_enabled && !test_mode) {
+        if (web_server_start(config.web_port)) {
+            printf("[STATUS] Web HUD running at http://0.0.0.0:%d/\n", config.web_port);
+        } else {
+            fprintf(stderr, "[WARNING] Failed to start Web HUD server on port %d\n", config.web_port);
+        }
+    }
 
-    printf("[STATUS] Overlay daemon running. Polling interval: %d ms\n", config.update_interval_ms);
+    /* Send startup notification toast */
+    notify_send_hud("PS5 Overlay Active", "CPU/GPU & RAM Monitor Running");
+
+    printf("[STATUS] Overlay daemon running. Toast interval: %d s | Polling: %d ms\n",
+           config.toast_interval_sec, config.update_interval_ms);
 
     HardwareMetrics metrics{};
     char hud_text[256]{};
+    char hud_line1[128]{};
+    char hud_line2[128]{};
     time_t last_toast_time = 0;
 
     /* Main monitor loop */
     while (s_running) {
         if (monitor_update(&metrics)) {
             monitor_format_hud_string(&metrics, &config, hud_text, sizeof(hud_text));
+            monitor_format_hud_lines(&metrics, &config, hud_line1, sizeof(hud_line1), hud_line2, sizeof(hud_line2));
+
             overlay_ui_update(hud_text);
+
+            if (config.web_server_enabled) {
+                web_server_update_metrics(&metrics);
+            }
 
             if (config.toast_notifications) {
                 time_t now = time(nullptr);
                 if (now - last_toast_time >= config.toast_interval_sec) {
-                    notify_send(hud_text);
+                    notify_send_hud(hud_line1, hud_line2);
                     last_toast_time = now;
                 }
             }
         }
 
         if (test_mode) {
-            printf("[TEST] HUD Output: %s\n", hud_text);
+            printf("[TEST] HUD Line 1: %s\n", hud_line1);
+            printf("[TEST] HUD Line 2: %s\n", hud_line2);
+            printf("[TEST] HUD Full:   %s\n", hud_text);
             break;
         }
 
@@ -101,6 +122,9 @@ int main(int argc, char** argv) {
     }
 
     printf("\n[STATUS] Shutting down PS5 Overlay daemon...\n");
+    if (config.web_server_enabled) {
+        web_server_stop();
+    }
     overlay_ui_shutdown();
     monitor_cleanup();
     printf("[STATUS] Goodbye!\n");

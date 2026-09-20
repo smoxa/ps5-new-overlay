@@ -5,9 +5,9 @@ CXX = $(PS5_PAYLOAD_SDK)/bin/prospero-clang++
 
 CFLAGS   = -O2 -Wall -Wextra -fPIC -fPIE -march=znver2 -Iinclude -I$(PS5_PAYLOAD_SDK)/include -DPS5=1 -D__PS5__=1
 CXXFLAGS = $(CFLAGS) -std=c++20
-LDFLAGS  = -pie -Wl,--gc-sections -L$(PS5_PAYLOAD_SDK)/lib -lkernel_sys -lSceLibcInternal -lSceSystemService -lSceSysmodule -lSceUserService -lSceNet
+LDFLAGS  = -pie -Wl,--gc-sections -L$(PS5_PAYLOAD_SDK)/lib -lkernel_sys -lSceNotification -lSceLibcInternal -lSceSystemService -lSceSysmodule -lSceUserService -lSceNet
 
-SRCS = src/main.cpp src/monitor.cpp src/overlay_ui.cpp src/notify.cpp src/config.cpp
+SRCS = src/main.cpp src/monitor.cpp src/overlay_ui.cpp src/notify.cpp src/config.cpp src/web_server.cpp
 OBJS = $(SRCS:.cpp=.o)
 TARGET = dist/ps5_overlay.elf
 

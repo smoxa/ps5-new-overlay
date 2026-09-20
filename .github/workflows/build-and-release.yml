@@ -137,20 +137,22 @@ jobs:
           body: |
             ## 🎮 PS5 Hardware Overlay ${{ steps.vars.outputs.tag }}
             
-            Lightweight, standalone in-game hardware monitoring overlay for jailbroken PlayStation 5.
+            Lightweight, standalone in-game hardware monitoring overlay for jailbroken PlayStation 5 (FW 1.xx - 10.xx+).
             
             ### ✨ Features
-            - **CPU Temperature** & **CPU Load** (Average & Per-Core)
-            - **GPU / APU SOC Temperature** & **VRAM Usage**
-            - **System RAM Usage** (Used / Total MB and %)
+            - **Native In-Game Toast OSD**: Automatic dual-line HUD toasts updating smoothly over games (`OverwriteLatest`).
+            - **Real-Time Web HUD (Port 8080)**: Dark-mode PlayStation dashboard viewable on phone, PC, or PS5 "Pin to Side" browser.
+            - **CPU Temperature** & **CPU Load** (Zen 2 8-core tracks)
+            - **GPU / SoC Temperature** & **VRAM Usage**
+            - **System RAM Usage** (Used / Total GB and %)
             - **Cooling Fan Speed** (Duty Cycle %)
-            - Persistent on-screen HUD bar (top/bottom)
-            - Zero extra bloat (no cheats, FTP, or heavy HEN payloads)
+            - Zero extra bloat (no cheats, FTP, or risk of kernel panics)
             
             ### 🚀 Quick Start
             1. Send `ps5_overlay.elf` to your console via port **9020** or **9021** (e.g. `nc -w 3 <ps5_ip> 9020 < ps5_overlay.elf`).
-            2. Alternatively, place `ps5_overlay.elf` in `/data/OnionHEN/payloads/` or `/data/etaHEN/payloads/` for automatic startup.
-            3. (Optional) Customize settings in `/data/ps5_overlay/config.ini` (see `config.ini.example`).
+            2. The overlay starts displaying dual-line toasts every 4s in the corner of your TV screen.
+            3. Open `http://<ps5_ip>:8080/` on your phone or PC (or pin to side in the PS5 browser) for the real-time HUD dashboard.
+            4. (Optional) Customize settings in `/data/ps5_overlay/config.ini`.
             
             ### 🔒 SHA-256 Checksums
             Included in `SHA256SUMS.txt`.

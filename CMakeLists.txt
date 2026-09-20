@@ -25,6 +25,7 @@ set(SOURCES
     src/overlay_ui.cpp
     src/notify.cpp
     src/config.cpp
+    src/web_server.cpp
 )
 
 set(INCLUDE_DIRS

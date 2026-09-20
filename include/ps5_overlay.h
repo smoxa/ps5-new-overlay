@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define PS5_OVERLAY_VERSION "1.0.0"
+#define PS5_OVERLAY_VERSION "1.0.1"
 #define PS5_OVERLAY_DEFAULT_CONFIG_PATH "/data/ps5_overlay/config.ini"
 
 #ifdef __cplusplus
@@ -40,8 +40,10 @@ typedef struct {
     int position;             /* 0 = Top, 1 = Bottom */
     int font_size;            /* Font size pt (default: 18) */
     int update_interval_ms;   /* Polling interval in ms (default: 1000) */
-    bool toast_notifications; /* Fallback/additional periodic OSD toast */
-    int toast_interval_sec;   /* Toast interval in seconds */
+    bool toast_notifications; /* Periodic native OSD toast overlay */
+    int toast_interval_sec;   /* Toast interval in seconds (default: 4) */
+    bool web_server_enabled;  /* Embedded real-time Web HUD (default: true) */
+    int web_port;             /* Web HUD HTTP port (default: 8080) */
 } OverlayConfig;
 
 #ifdef __cplusplus
