@@ -15,6 +15,7 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <ps5/kernel.h>
+#include <ps5/nid.h>
 
 #define PTRACE_AUTHID 0x4800000000010003ULL
 
@@ -81,37 +82,40 @@ bool shellui_inject_elf(pid_t shellui_pid, const uint8_t *elf_data, size_t elf_s
 
     printf("[INJECT] Preparing to inject overlay into SceShellUI (PID: %d)...\n", shellui_pid);
 
+    uint64_t original_authid = kernel_get_ucred_authid(getpid());
+    kernel_set_ucred_authid(getpid(), PTRACE_AUTHID);
+
     if (pt_attach(shellui_pid) < 0) {
         perror("[INJECT] pt_attach failed");
+        kernel_set_ucred_authid(getpid(), original_authid);
         return false;
     }
     printf("[INJECT] Attached to SceShellUI (PID: %d)\n", shellui_pid);
 
-    void* remote_pthread_create = nullptr;
-    int libc_handle = 0;
-    syscall(594, "libSceLibcInternal.sprx", 0, &libc_handle, 0);
-    syscall(591, libc_handle, "pthread_create", &remote_pthread_create);
+    char nid[12] = {0};
+    nid_encode("pthread_create", nid);
+    intptr_t remote_pthread_create = pt_resolve(shellui_pid, nid);
     if (!remote_pthread_create) {
-        syscall(591, 0x2001, "pthread_create", &remote_pthread_create);
-    }
-
-    void* remote_debug_out = nullptr;
-    syscall(591, 0x2001, "sceKernelDebugOutText", &remote_debug_out);
-
-    if (!remote_pthread_create) {
-        fprintf(stderr, "[INJECT] Failed to resolve pthread_create via syscall 591!\n");
+        fprintf(stderr, "[INJECT] Failed to resolve pthread_create in target!\n");
         pt_detach(shellui_pid, 0);
+        kernel_set_ucred_authid(getpid(), original_authid);
         return false;
     }
+
+    nid_encode("sceKernelDebugOutText", nid);
+    intptr_t remote_debug_out = pt_resolve(shellui_pid, nid);
 
     printf("[INJECT] Loading ELF into target address space...\n");
     intptr_t entry = elfldr_load(shellui_pid, const_cast<uint8_t*>(elf_data));
     if (entry <= 0) {
         fprintf(stderr, "[INJECT] elfldr_load failed!\n");
         pt_detach(shellui_pid, 0);
+        kernel_set_ucred_authid(getpid(), original_authid);
         return false;
     }
     printf("[INJECT] Target ELF entrypoint at: %#lx\n", (unsigned long)entry);
+
+    intptr_t args = elfldr_payload_args(shellui_pid);
 
     uint64_t shellcode_size = get_stager_size();
     if (shellcode_size == 0) shellcode_size = 64;
@@ -122,13 +126,15 @@ bool shellui_inject_elf(pid_t shellui_pid, const uint8_t *elf_data, size_t elf_s
     if (!bootstrap || bootstrap == (uint64_t)-1) {
         fprintf(stderr, "[INJECT] Failed to allocate bootstrap stager\n");
         pt_detach(shellui_pid, 0);
+        kernel_set_ucred_authid(getpid(), original_authid);
         return false;
     }
 
-    if (pt_mprotect(shellui_pid, bootstrap, shellcode_size,
-                    PROT_EXEC | PROT_WRITE | PROT_READ) != 0) {
-        fprintf(stderr, "[INJECT] Failed to pt_mprotect bootstrap stager\n");
+    if (kernel_mprotect(shellui_pid, bootstrap, shellcode_size,
+                        PROT_EXEC | PROT_WRITE | PROT_READ) != 0) {
+        fprintf(stderr, "[INJECT] Failed to mprotect bootstrap stager\n");
         pt_detach(shellui_pid, 0);
+        kernel_set_ucred_authid(getpid(), original_authid);
         return false;
     }
 
@@ -138,7 +144,7 @@ bool shellui_inject_elf(pid_t shellui_pid, const uint8_t *elf_data, size_t elf_s
     sce_functions.sceKernelDebugOutText = (void*(*)(int, const char*))remote_debug_out;
     sce_functions.pthread_create_ptr = (int(*)(pthread_t*, const void*, void*(*)(void*), void*))remote_pthread_create;
     sce_functions.elf_main = (void*(*)(void*))entry;
-    sce_functions.payload_args = nullptr;
+    sce_functions.payload_args = (void*)args;
 
     uint64_t sce_ptr_mem = pt_mmap(shellui_pid, 0, sizeof(sce_functions),
                                    PROT_READ | PROT_WRITE,
@@ -146,6 +152,7 @@ bool shellui_inject_elf(pid_t shellui_pid, const uint8_t *elf_data, size_t elf_s
     if (!sce_ptr_mem || sce_ptr_mem == (uint64_t)-1) {
         fprintf(stderr, "[INJECT] Failed to allocate SCEFunctions block\n");
         pt_detach(shellui_pid, 0);
+        kernel_set_ucred_authid(getpid(), original_authid);
         return false;
     }
     pt_copyin(shellui_pid, &sce_functions, sce_ptr_mem, sizeof(sce_functions));
@@ -154,10 +161,12 @@ bool shellui_inject_elf(pid_t shellui_pid, const uint8_t *elf_data, size_t elf_s
     if (pt_call2(shellui_pid, bootstrap, sce_ptr_mem) == -1) {
         fprintf(stderr, "[INJECT] pt_call2 failed!\n");
         pt_detach(shellui_pid, 0);
+        kernel_set_ucred_authid(getpid(), original_authid);
         return false;
     }
 
     pt_detach(shellui_pid, 0);
+    kernel_set_ucred_authid(getpid(), original_authid);
 
     printf("[INJECT] Injection complete! Overlay thread spawned inside SceShellUI.\n");
     return true;

@@ -72,15 +72,19 @@ int main(int argc, char** argv) {
     }
 
     /* Inject in-game overlay into SceShellUI if not already active */
+    bool hud_injected = false;
+    /* Inject in-game overlay into SceShellUI if not already active */
     if (!test_mode) {
         if (shellui_is_injected()) {
             printf("[STATUS] SceShellUI in-game HUD already active.\n");
+            hud_injected = true;
         } else {
             pid_t shellui_pid = shellui_find_pid();
             if (shellui_pid > 0) {
                 printf("[STATUS] Found SceShellUI (PID: %d). Injecting in-game overlay...\n", shellui_pid);
                 if (shellui_inject_elf(shellui_pid, g_overlay_shellui_elf, g_overlay_shellui_elf_size)) {
                     printf("[STATUS] Successfully injected HUD into SceShellUI!\n");
+                    hud_injected = true;
                 } else {
                     fprintf(stderr, "[WARNING] Failed to inject HUD into SceShellUI.\n");
                 }
@@ -100,7 +104,11 @@ int main(int argc, char** argv) {
     }
 
     /* Send single startup notification toast */
-    notify_send_hud("PS5 Overlay Active", "In-Game HUD: On Screen | Web: port 8080");
+    if (hud_injected) {
+        notify_send_hud("PS5 Overlay Active", "HUD Injected! Open game to see OSD | Web: 8080");
+    } else {
+        notify_send_hud("PS5 Overlay Warning", "HUD inject failed. Check http://<ip>:8080/log");
+    }
 
     printf("[STATUS] Overlay daemon running. Toast interval: %d s | Polling: %d ms\n",
            config.toast_interval_sec, config.update_interval_ms);

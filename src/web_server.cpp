@@ -598,6 +598,25 @@ static void handle_client(SOCKET client_sock) {
 
         send(client_sock, header, header_len, 0);
         send(client_sock, HTML_OVERLAY_PAGE, html_len, 0);
+    } else if (strncmp(req, "GET /log", 8) == 0) {
+        char buf[8192] = "No log file found at /system_tmp/ps5_overlay.log\n";
+        FILE* f = fopen("/system_tmp/ps5_overlay.log", "r");
+        if (f) {
+            size_t bytes = fread(buf, 1, sizeof(buf) - 1, f);
+            buf[bytes] = '\0';
+            fclose(f);
+        }
+        int log_len = (int)strlen(buf);
+        char header[256];
+        int header_len = snprintf(header, sizeof(header),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain; charset=utf-8\r\n"
+            "Content-Length: %d\r\n"
+            "Connection: close\r\n\r\n",
+            log_len
+        );
+        send(client_sock, header, header_len, 0);
+        send(client_sock, buf, log_len, 0);
     } else {
         const char not_found[] =
             "HTTP/1.1 404 Not Found\r\n"
