@@ -709,23 +709,24 @@ int main(int argc, const char* argv[]) {
     MonoImage* pui_img = nullptr;
     MonoImage* app_img = nullptr;
 
-    for (int retry = 0; retry < 10 && (!pui_img || !app_img); retry++) {
+    while (!pui_img || !app_img) {
         if (!pui_img) pui_img = load_system_dll(domain, "Sce.PlayStation.PUI.dll");
-        if (!app_img) app_img = load_system_dll(domain, "Sce.PlayStation.AppSystem.dll");
+        if (!app_img) {
+            app_img = load_system_dll(domain, "Sce.Vsh.ShellUI.AppSystem.dll");
+            if (!app_img) app_img = load_system_dll(domain, "Sce.PlayStation.AppSystem.dll");
+        }
         if (!pui_img || !app_img) {
-            log_shellui("[SHELLUI] Waiting for system DLLs (%d/10)...\n", retry + 1);
+            log_shellui("[SHELLUI] Waiting for PUI / AppSystem assemblies...\n");
             sleep(1);
         }
-    }
-
-    if (!pui_img || !app_img) {
-        log_shellui("[SHELLUI] Failed to load required system assemblies\n");
-        return -1;
     }
     log_shellui("[SHELLUI] Loaded PUI (%p) and AppSystem (%p)\n", pui_img, app_img);
 
     /* 5. Lookup classes and methods */
-    MonoClass* layer_mgr_class = mono_class_from_name(app_img, "Sce.PlayStation.AppSystem", "LayerManager");
+    MonoClass* layer_mgr_class = mono_class_from_name(app_img, "Sce.Vsh.ShellUI.AppSystem", "LayerManager");
+    if (!layer_mgr_class) {
+        layer_mgr_class = mono_class_from_name(app_img, "Sce.PlayStation.AppSystem", "LayerManager");
+    }
     MonoClass* scene_class = mono_class_from_name(pui_img, "Sce.PlayStation.PUI.UI2", "Scene");
     MonoClass* widget_class = mono_class_from_name(pui_img, "Sce.PlayStation.PUI.UI2", "Widget");
     MonoClass* panel_class = mono_class_from_name(pui_img, "Sce.PlayStation.PUI.UI2", "Panel");
