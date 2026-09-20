@@ -1,4 +1,5 @@
 #include "web_server.h"
+#include "themes_html.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -346,7 +347,7 @@ static const char HTML_PAGE[] =
 "      <h1>PS5 <span>OVERLAY HUD</span></h1>\n"
 "    </div>\n"
 "    <div style=\"display:flex;align-items:center;gap:10px;\">\n"
-"      <a href=\"/overlay\" style=\"color:var(--ps-cyan);text-decoration:none;font-size:0.75rem;font-weight:700;border:1px solid var(--card-border);padding:4px 12px;border-radius:20px;letter-spacing:1px;background:rgba(0,162,255,0.08);\">OVERLAY BAR</a>\n"
+"      <a href=\"/themes\" style=\"color:#fff;text-decoration:none;font-size:0.75rem;font-weight:700;border:1px solid rgba(0,200,255,0.6);padding:5px 14px;border-radius:20px;letter-spacing:0.5px;background:linear-gradient(135deg,#00a3ff,#0051ff);box-shadow:0 0 12px rgba(0,163,255,0.4);\">🎨 10 ТЕМ &amp; ТВ ОВЕРЛЕЙ</a>\n"
 "      <div class=\"badge\" id=\"conn-badge\">\n"
 "        <div class=\"pulse-dot\" id=\"pulse-dot\"></div>\n"
 "        <span id=\"conn-text\">LIVE</span>\n"
@@ -572,6 +573,70 @@ static void handle_client(SOCKET client_sock) {
 
         send(client_sock, header, header_len, 0);
         send(client_sock, json, json_len, 0);
+    } else if (strncmp(req, "GET /api/theme/set", 18) == 0 || strncmp(req, "POST /api/theme/set", 19) == 0) {
+        char name[32] = "esports";
+        char pos[16] = "top";
+        const char* q = strchr(req, '?');
+        if (q) {
+            const char* end_q = strchr(q, ' ');
+            const char* p_name = strstr(q, "name=");
+            if (p_name && (!end_q || p_name < end_q)) {
+                p_name += 5;
+                int i = 0;
+                while (*p_name && *p_name != '&' && *p_name != ' ' && *p_name != '\r' && *p_name != '\n' && i < 31) {
+                    name[i++] = *p_name++;
+                }
+                name[i] = '\0';
+            }
+            const char* p_pos = strstr(q, "pos=");
+            if (p_pos && (!end_q || p_pos < end_q)) {
+                p_pos += 4;
+                int i = 0;
+                while (*p_pos && *p_pos != '&' && *p_pos != ' ' && *p_pos != '\r' && *p_pos != '\n' && i < 15) {
+                    pos[i++] = *p_pos++;
+                }
+                pos[i] = '\0';
+            }
+        }
+        FILE* fp = fopen("/system_tmp/ps5_overlay_theme.txt", "w");
+        if (fp) {
+            fprintf(fp, "%s %s\n", name, pos);
+            fclose(fp);
+        }
+        char json[256];
+        int json_len = snprintf(json, sizeof(json),
+            "{\"status\":\"ok\",\"theme\":\"%s\",\"pos\":\"%s\"}", name, pos);
+        char header[256];
+        int header_len = snprintf(header, sizeof(header),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: %d\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Connection: close\r\n\r\n",
+            json_len);
+        send(client_sock, header, header_len, 0);
+        send(client_sock, json, json_len, 0);
+    } else if (strncmp(req, "GET /api/theme", 14) == 0) {
+        char name[32] = "esports";
+        char pos[16] = "top";
+        FILE* fp = fopen("/system_tmp/ps5_overlay_theme.txt", "r");
+        if (fp) {
+            fscanf(fp, "%31s %15s", name, pos);
+            fclose(fp);
+        }
+        char json[256];
+        int json_len = snprintf(json, sizeof(json),
+            "{\"theme\":\"%s\",\"pos\":\"%s\"}", name, pos);
+        char header[256];
+        int header_len = snprintf(header, sizeof(header),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: %d\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Connection: close\r\n\r\n",
+            json_len);
+        send(client_sock, header, header_len, 0);
+        send(client_sock, json, json_len, 0);
     } else if (strncmp(req, "GET / ", 6) == 0 || strncmp(req, "GET /index.html", 15) == 0) {
         int html_len = (int)strlen(HTML_PAGE);
         char header[256];
@@ -585,7 +650,21 @@ static void handle_client(SOCKET client_sock) {
 
         send(client_sock, header, header_len, 0);
         send(client_sock, HTML_PAGE, html_len, 0);
-    } else if (strncmp(req, "GET /overlay", 12) == 0 || strncmp(req, "GET /bar", 8) == 0) {
+    } else if (strncmp(req, "GET /themes", 11) == 0 || strncmp(req, "GET /studio", 11) == 0 ||
+               strncmp(req, "GET /overlay", 12) == 0) {
+        int html_len = (int)strlen(HTML_THEMES_STUDIO);
+        char header[256];
+        int header_len = snprintf(header, sizeof(header),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html; charset=utf-8\r\n"
+            "Content-Length: %d\r\n"
+            "Connection: close\r\n\r\n",
+            html_len
+        );
+
+        send(client_sock, header, header_len, 0);
+        send(client_sock, HTML_THEMES_STUDIO, html_len, 0);
+    } else if (strncmp(req, "GET /bar", 8) == 0) {
         int html_len = (int)strlen(HTML_OVERLAY_PAGE);
         char header[256];
         int header_len = snprintf(header, sizeof(header),

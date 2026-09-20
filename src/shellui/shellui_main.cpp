@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include <cmath>
+#include <vector>
 
 #if defined(__PS5__) || defined(PS5)
 #include <sys/mman.h>
@@ -255,12 +256,26 @@ static void widget_append_child(MonoClass* widget_class, MonoObject* parent, Mon
     }
 }
 
+static std::vector<MonoObject*> s_active_theme_widgets;
+static MonoMethod* s_method_remove_from_parent = nullptr;
+
+static void cleanup_active_theme() {
+    if (!s_method_remove_from_parent) return;
+    for (size_t i = 0; i < s_active_theme_widgets.size(); i++) {
+        MonoObject* w = s_active_theme_widgets[i];
+        if (w) {
+            mono_runtime_invoke(s_method_remove_from_parent, w, nullptr, nullptr);
+        }
+    }
+    s_active_theme_widgets.clear();
+}
+
 static MonoObject* create_hud_item(MonoDomain* domain, MonoImage* pui_img,
                                    MonoClass* widget_class, MonoClass* panel_class, MonoClass* label_class,
-                                   MonoObject* root, const char* name, float x, float y,
+                                   MonoObject* root, const char* name, float x, float y, float cell_y,
                                    const char* text, MonoObject* font,
                                    float r, float g, float b, float a = 1.0f) {
-    /* 1. Container cell (Panel) positioned at (X = x, Y = 0) */
+    /* 1. Container cell (Panel) positioned at (X = x, Y = cell_y) */
     MonoObject* cell = mono_object_new(domain, panel_class);
     if (!cell) return nullptr;
     mono_runtime_object_init(cell);
@@ -269,11 +284,12 @@ static MonoObject* create_hud_item(MonoDomain* domain, MonoImage* pui_img,
     snprintf(cell_name, sizeof(cell_name), "%s_cell", name);
     Set_Property(panel_class, cell, "Name", mono_string_new(domain, cell_name));
     Set_Property(panel_class, cell, "X", x);
-    Set_Property(panel_class, cell, "Y", 0.0f);
+    Set_Property(panel_class, cell, "Y", cell_y);
     Set_Property(panel_class, cell, "Width", 300.0f);
     Set_Property(panel_class, cell, "Height", 34.0f);
     Set_Property(panel_class, cell, "BackgroundVisibility", false);
     widget_append_child(widget_class, root, cell);
+    s_active_theme_widgets.push_back(cell);
 
     /* 2. Label inside container cell */
     MonoObject* label = mono_object_new(domain, label_class);
@@ -304,6 +320,383 @@ static MonoObject* create_hud_item(MonoDomain* domain, MonoImage* pui_img,
 
     widget_append_child(widget_class, cell, label);
     return label;
+}
+
+static MonoObject* create_modular_card(MonoDomain* domain, MonoImage* pui_img,
+                                       MonoClass* widget_class, MonoClass* panel_class, MonoClass* label_class,
+                                       MonoObject* root, float x, float y,
+                                       const char* title, const char* default_val, const char* subtext,
+                                       float bg_r, float bg_g, float bg_b, float bg_a,
+                                       float accent_r, float accent_g, float accent_b,
+                                       float title_r, float title_g, float title_b,
+                                       float val_r, float val_g, float val_b,
+                                       MonoObject*& out_val_label) {
+    // 1. Base card panel
+    MonoObject* card = mono_object_new(domain, panel_class);
+    mono_runtime_object_init(card);
+    Set_Property(panel_class, card, "X", x);
+    Set_Property(panel_class, card, "Y", y);
+    Set_Property(panel_class, card, "Width", 136.0f);
+    Set_Property(panel_class, card, "Height", 76.0f);
+    MonoObject* bg_col = create_ui_color(pui_img, domain, bg_r, bg_g, bg_b, bg_a);
+    if (bg_col) Set_Property_Invoke(panel_class, card, "BackgroundColor", bg_col);
+    Set_Property(panel_class, card, "BackgroundVisibility", true);
+    Set_Property(panel_class, card, "BackgroundOpacity", 1.0f);
+    Set_Property(panel_class, card, "BackgroundStyle", 1);
+    widget_append_child(widget_class, root, card);
+    s_active_theme_widgets.push_back(card);
+
+    // 2. Top accent stripe (3px high)
+    MonoObject* strip = mono_object_new(domain, panel_class);
+    mono_runtime_object_init(strip);
+    Set_Property(panel_class, strip, "X", 0.0f);
+    Set_Property(panel_class, strip, "Y", 0.0f);
+    Set_Property(panel_class, strip, "Width", 136.0f);
+    Set_Property(panel_class, strip, "Height", 3.0f);
+    MonoObject* strip_col = create_ui_color(pui_img, domain, accent_r, accent_g, accent_b, 1.0f);
+    if (strip_col) Set_Property_Invoke(panel_class, strip, "BackgroundColor", strip_col);
+    Set_Property(panel_class, strip, "BackgroundVisibility", true);
+    Set_Property(panel_class, strip, "BackgroundOpacity", 1.0f);
+    widget_append_child(widget_class, card, strip);
+
+    // 3. Header title (11pt)
+    MonoObject* font_head = create_ui_font(pui_img, domain, 11, 1, 700);
+    MonoObject* head_lbl = mono_object_new(domain, label_class);
+    mono_runtime_object_init(head_lbl);
+    Set_Property(label_class, head_lbl, "PositionType", 1);
+    Set_Property(label_class, head_lbl, "MarginLeft", 8.0f);
+    Set_Property(label_class, head_lbl, "MarginTop", 8.0f);
+    Set_Property(label_class, head_lbl, "Width", 120.0f);
+    Set_Property(label_class, head_lbl, "Height", 16.0f);
+    Set_Property(label_class, head_lbl, "Text", mono_string_new(domain, title));
+    Set_Property_Invoke(label_class, head_lbl, "Font", font_head);
+    MonoObject* head_col = create_ui_color(pui_img, domain, title_r, title_g, title_b, 1.0f);
+    if (head_col) Set_Property_Invoke(label_class, head_lbl, "TextColor", head_col);
+    widget_append_child(widget_class, card, head_lbl);
+
+    // 4. Big value label (22pt bold)
+    MonoObject* font_val = create_ui_font(pui_img, domain, 22, 1, 900);
+    MonoObject* val_lbl = mono_object_new(domain, label_class);
+    mono_runtime_object_init(val_lbl);
+    Set_Property(label_class, val_lbl, "PositionType", 1);
+    Set_Property(label_class, val_lbl, "MarginLeft", 8.0f);
+    Set_Property(label_class, val_lbl, "MarginTop", 24.0f);
+    Set_Property(label_class, val_lbl, "Width", 120.0f);
+    Set_Property(label_class, val_lbl, "Height", 30.0f);
+    Set_Property(label_class, val_lbl, "Text", mono_string_new(domain, default_val));
+    Set_Property_Invoke(label_class, val_lbl, "Font", font_val);
+    MonoObject* val_col = create_ui_color(pui_img, domain, val_r, val_g, val_b, 1.0f);
+    if (val_col) Set_Property_Invoke(label_class, val_lbl, "TextColor", val_col);
+    Set_Property(label_class, val_lbl, "EnableThemedTextShadow", true);
+    widget_append_child(widget_class, card, val_lbl);
+    out_val_label = val_lbl;
+
+    // 5. Sub label (10pt)
+    MonoObject* font_sub = create_ui_font(pui_img, domain, 10, 1, 600);
+    MonoObject* sub_lbl = mono_object_new(domain, label_class);
+    mono_runtime_object_init(sub_lbl);
+    Set_Property(label_class, sub_lbl, "PositionType", 1);
+    Set_Property(label_class, sub_lbl, "MarginLeft", 8.0f);
+    Set_Property(label_class, sub_lbl, "MarginTop", 56.0f);
+    Set_Property(label_class, sub_lbl, "Width", 120.0f);
+    Set_Property(label_class, sub_lbl, "Height", 16.0f);
+    Set_Property(label_class, sub_lbl, "Text", mono_string_new(domain, subtext));
+    Set_Property_Invoke(label_class, sub_lbl, "Font", font_sub);
+    MonoObject* sub_col = create_ui_color(pui_img, domain, accent_r, accent_g, accent_b, 0.90f);
+    if (sub_col) Set_Property_Invoke(label_class, sub_lbl, "TextColor", sub_col);
+    widget_append_child(widget_class, card, sub_lbl);
+
+    return card;
+}
+
+static void build_theme_esports(MonoDomain* domain, MonoImage* pui_img,
+                                MonoClass* widget_class, MonoClass* panel_class, MonoClass* label_class,
+                                MonoObject* root, float base_y,
+                                MonoObject*& out_cpu, MonoObject*& out_gpu,
+                                MonoObject*& out_ram, MonoObject*& out_fan) {
+    MonoObject* bg = mono_object_new(domain, panel_class);
+    mono_runtime_object_init(bg);
+    Set_Property(panel_class, bg, "X", 0.0f);
+    Set_Property(panel_class, bg, "Y", base_y);
+    Set_Property(panel_class, bg, "Width", 1920.0f);
+    Set_Property(panel_class, bg, "Height", 34.0f);
+    MonoObject* col = create_ui_color(pui_img, domain, 0.0f, 0.0f, 0.0f, 0.70f);
+    if (col) Set_Property_Invoke(panel_class, bg, "BackgroundColor", col);
+    Set_Property(panel_class, bg, "BackgroundVisibility", true);
+    Set_Property(panel_class, bg, "BackgroundOpacity", 1.0f);
+    Set_Property(panel_class, bg, "BackgroundStyle", 1);
+    widget_append_child(widget_class, root, bg);
+    s_active_theme_widgets.push_back(bg);
+
+    MonoObject* font = create_ui_font(pui_img, domain, 18, 1, 900);
+    float y = 5.0f;
+
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "es_cpu_lbl", 24.0f, y, base_y, "CPU", font, 102.0f/255.0f, 1.0f, 102.0f/255.0f);
+    out_cpu = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                              "es_cpu_val", 72.0f, y, base_y, "--°C", font, 1.0f, 1.0f, 1.0f);
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "es_sep1", 138.0f, y, base_y, "|", font, 0.75f, 0.75f, 0.75f);
+
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "es_gpu_lbl", 158.0f, y, base_y, "GPU", font, 179.0f/255.0f, 102.0f/255.0f, 1.0f);
+    out_gpu = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                              "es_gpu_val", 206.0f, y, base_y, "--°C", font, 1.0f, 1.0f, 1.0f);
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "es_sep2", 270.0f, y, base_y, "|", font, 0.75f, 0.75f, 0.75f);
+
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "es_ram_lbl", 290.0f, y, base_y, "RAM", font, 1.0f, 179.0f/255.0f, 77.0f/255.0f);
+    out_ram = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                              "es_ram_val", 344.0f, y, base_y, "-- GB", font, 1.0f, 1.0f, 1.0f);
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "es_sep3", 452.0f, y, base_y, "|", font, 0.75f, 0.75f, 0.75f);
+
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "es_fan_lbl", 472.0f, y, base_y, "FAN", font, 51.0f/255.0f, 224.0f/255.0f, 1.0f);
+    out_fan = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                              "es_fan_val", 518.0f, y, base_y, "--%", font, 1.0f, 1.0f, 1.0f);
+}
+
+static void build_theme_matrix(MonoDomain* domain, MonoImage* pui_img,
+                               MonoClass* widget_class, MonoClass* panel_class, MonoClass* label_class,
+                               MonoObject* root, float base_y,
+                               MonoObject*& out_cpu, MonoObject*& out_gpu,
+                               MonoObject*& out_ram, MonoObject*& out_fan) {
+    MonoObject* bg = mono_object_new(domain, panel_class);
+    mono_runtime_object_init(bg);
+    Set_Property(panel_class, bg, "X", 0.0f);
+    Set_Property(panel_class, bg, "Y", base_y);
+    Set_Property(panel_class, bg, "Width", 1920.0f);
+    Set_Property(panel_class, bg, "Height", 34.0f);
+    MonoObject* col = create_ui_color(pui_img, domain, 5.0f/255.0f, 11.0f/255.0f, 7.0f/255.0f, 0.88f);
+    if (col) Set_Property_Invoke(panel_class, bg, "BackgroundColor", col);
+    Set_Property(panel_class, bg, "BackgroundVisibility", true);
+    Set_Property(panel_class, bg, "BackgroundOpacity", 1.0f);
+    Set_Property(panel_class, bg, "BackgroundStyle", 1);
+    widget_append_child(widget_class, root, bg);
+    s_active_theme_widgets.push_back(bg);
+
+    MonoObject* font = create_ui_font(pui_img, domain, 18, 1, 900);
+    float y = 5.0f;
+    float gr = 34.0f/255.0f, gg = 197.0f/255.0f, gb = 94.0f/255.0f;
+
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "mt_cpu_lbl", 24.0f, y, base_y, "CPU:", font, gr, gg, gb);
+    out_cpu = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                              "mt_cpu_val", 76.0f, y, base_y, "--°C", font, gr, gg, gb);
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "mt_sep1", 142.0f, y, base_y, "][", font, gr*0.6f, gg*0.6f, gb*0.6f);
+
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "mt_gpu_lbl", 168.0f, y, base_y, "GPU:", font, gr, gg, gb);
+    out_gpu = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                              "mt_gpu_val", 220.0f, y, base_y, "--°C", font, gr, gg, gb);
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "mt_sep2", 284.0f, y, base_y, "][", font, gr*0.6f, gg*0.6f, gb*0.6f);
+
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "mt_ram_lbl", 310.0f, y, base_y, "RAM:", font, gr, gg, gb);
+    out_ram = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                              "mt_ram_val", 364.0f, y, base_y, "-- GB", font, gr, gg, gb);
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "mt_sep3", 472.0f, y, base_y, "][", font, gr*0.6f, gg*0.6f, gb*0.6f);
+
+    create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                    "mt_fan_lbl", 498.0f, y, base_y, "FAN:", font, gr, gg, gb);
+    out_fan = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root,
+                              "mt_fan_val", 550.0f, y, base_y, "--%", font, gr, gg, gb);
+}
+
+static void build_theme_rog(MonoDomain* domain, MonoImage* pui_img,
+                            MonoClass* widget_class, MonoClass* panel_class, MonoClass* label_class,
+                            MonoObject* root, float base_x, float base_y,
+                            MonoObject*& out_cpu, MonoObject*& out_gpu,
+                            MonoObject*& out_ram, MonoObject*& out_fan) {
+    float bg_r = 18.0f/255.0f, bg_g = 19.0f/255.0f, bg_b = 24.0f/255.0f, bg_a = 0.90f;
+    float rog_r = 255.0f/255.0f, rog_g = 23.0f/255.0f, rog_b = 68.0f/255.0f;
+    float silver_r = 161.0f/255.0f, silver_g = 161.0f/255.0f, silver_b = 170.0f/255.0f;
+    float white = 1.0f;
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x, base_y, "CPU [ZEN 2]", "--°C", "CORE TEMP",
+                        bg_r, bg_g, bg_b, bg_a, rog_r, rog_g, rog_b, silver_r, silver_g, silver_b, white, white, white, out_cpu);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x + 146.0f, base_y, "GPU [RDNA 2]", "--°C", "SOC TEMP",
+                        bg_r, bg_g, bg_b, bg_a, rog_r, rog_g, rog_b, silver_r, silver_g, silver_b, white, white, white, out_gpu);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x + 292.0f, base_y, "SYS MEMORY", "-- GB", "16.0 GB POOL",
+                        bg_r, bg_g, bg_b, bg_a, 200.0f/255.0f, 200.0f/255.0f, 200.0f/255.0f, silver_r, silver_g, silver_b, white, white, white, out_ram);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x + 438.0f, base_y, "COOLING FAN", "--%", "QUIET BEARING",
+                        bg_r, bg_g, bg_b, bg_a, 16.0f/255.0f, 185.0f/255.0f, 129.0f/255.0f, silver_r, silver_g, silver_b, white, white, white, out_fan);
+}
+
+static void build_theme_deck(MonoDomain* domain, MonoImage* pui_img,
+                             MonoClass* widget_class, MonoClass* panel_class, MonoClass* label_class,
+                             MonoObject* root, float base_x, float base_y,
+                             MonoObject*& out_cpu, MonoObject*& out_gpu,
+                             MonoObject*& out_ram, MonoObject*& out_fan) {
+    float bg_r = 15.0f/255.0f, bg_g = 23.0f/255.0f, bg_b = 37.0f/255.0f, bg_a = 0.90f;
+    float cyan_r = 56.0f/255.0f, cyan_g = 189.0f/255.0f, cyan_b = 248.0f/255.0f;
+    float slate_r = 148.0f/255.0f, slate_g = 163.0f/255.0f, slate_b = 184.0f/255.0f;
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x, base_y, "CPU (ZEN 2)", "--°C", "8 CORES",
+                        bg_r, bg_g, bg_b, bg_a, cyan_r, cyan_g, cyan_b, slate_r, slate_g, slate_b, cyan_r, cyan_g, cyan_b, out_cpu);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x + 146.0f, base_y, "GPU (RDNA 2)", "--°C", "RDNA 2 APU",
+                        bg_r, bg_g, bg_b, bg_a, cyan_r, cyan_g, cyan_b, slate_r, slate_g, slate_b, cyan_r, cyan_g, cyan_b, out_gpu);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x + 292.0f, base_y, "SYSTEM RAM", "-- GB", "LPDDR5",
+                        bg_r, bg_g, bg_b, bg_a, cyan_r, cyan_g, cyan_b, slate_r, slate_g, slate_b, 1.0f, 1.0f, 1.0f, out_ram);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x + 438.0f, base_y, "COOLING FAN", "--%", "FAN DUTY",
+                        bg_r, bg_g, bg_b, bg_a, 52.0f/255.0f, 211.0f/255.0f, 153.0f/255.0f, slate_r, slate_g, slate_b, 1.0f, 1.0f, 1.0f, out_fan);
+}
+
+static void build_theme_cyber(MonoDomain* domain, MonoImage* pui_img,
+                              MonoClass* widget_class, MonoClass* panel_class, MonoClass* label_class,
+                              MonoObject* root, float base_x, float base_y,
+                              MonoObject*& out_cpu, MonoObject*& out_gpu,
+                              MonoObject*& out_ram, MonoObject*& out_fan) {
+    float bg_r = 10.0f/255.0f, bg_g = 13.0f/255.0f, bg_b = 24.0f/255.0f, bg_a = 0.92f;
+    float yel_r = 252.0f/255.0f, yel_g = 238.0f/255.0f, yel_b = 10.0f/255.0f;
+    float cyn_r = 0.0f/255.0f, cyn_g = 240.0f/255.0f, cyn_b = 255.0f/255.0f;
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x, base_y, "CPU // ZEN2", "--°C", "CORE // ACTIVE",
+                        bg_r, bg_g, bg_b, bg_a, yel_r, yel_g, yel_b, cyn_r, cyn_g, cyn_b, yel_r, yel_g, yel_b, out_cpu);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x + 146.0f, base_y, "GPU // RDNA2", "--°C", "RASTER // NOMINAL",
+                        bg_r, bg_g, bg_b, bg_a, cyn_r, cyn_g, cyn_b, yel_r, yel_g, yel_b, cyn_r, cyn_g, cyn_b, out_gpu);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x + 292.0f, base_y, "RAM // MEMORY", "-- GB", "ALLOC // 16GB",
+                        bg_r, bg_g, bg_b, bg_a, 168.0f/255.0f, 85.0f/255.0f, 247.0f/255.0f, cyn_r, cyn_g, cyn_b, 1.0f, 1.0f, 1.0f, out_ram);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x + 438.0f, base_y, "FAN // TACHO", "--%", "SPEED // PWM",
+                        bg_r, bg_g, bg_b, bg_a, 16.0f/255.0f, 185.0f/255.0f, 129.0f/255.0f, cyn_r, cyn_g, cyn_b, 1.0f, 1.0f, 1.0f, out_fan);
+}
+
+static void build_theme_dock(MonoDomain* domain, MonoImage* pui_img,
+                             MonoClass* widget_class, MonoClass* panel_class, MonoClass* label_class,
+                             MonoObject* root, float base_x, float base_y,
+                             MonoObject*& out_cpu, MonoObject*& out_gpu,
+                             MonoObject*& out_ram, MonoObject*& out_fan) {
+    float bg_r = 14.0f/255.0f, bg_g = 20.0f/255.0f, bg_b = 34.0f/255.0f, bg_a = 0.94f;
+    float purp_r = 168.0f/255.0f, purp_g = 85.0f/255.0f, purp_b = 247.0f/255.0f;
+    float cyn_r = 56.0f/255.0f, cyn_g = 189.0f/255.0f, cyn_b = 248.0f/255.0f;
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x, base_y, "CPU ZEN 2", "--°C", "LIVE TEMP",
+                        bg_r, bg_g, bg_b, bg_a, cyn_r, cyn_g, cyn_b, purp_r, purp_g, purp_b, cyn_r, cyn_g, cyn_b, out_cpu);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x, base_y + 82.0f, "GPU RDNA 2", "--°C", "SOC TEMP",
+                        bg_r, bg_g, bg_b, bg_a, cyn_r, cyn_g, cyn_b, purp_r, purp_g, purp_b, cyn_r, cyn_g, cyn_b, out_gpu);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x, base_y + 164.0f, "MEM POOL", "-- GB", "SYSTEM RAM",
+                        bg_r, bg_g, bg_b, bg_a, purp_r, purp_g, purp_b, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, out_ram);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x, base_y + 246.0f, "FAN SPEED", "--%", "TACHO PWM",
+                        bg_r, bg_g, bg_b, bg_a, 16.0f/255.0f, 185.0f/255.0f, 129.0f/255.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, out_fan);
+}
+
+static void build_theme_prism(MonoDomain* domain, MonoImage* pui_img,
+                              MonoClass* widget_class, MonoClass* panel_class, MonoClass* label_class,
+                              MonoObject* root, float base_x, float base_y,
+                              MonoObject*& out_cpu, MonoObject*& out_gpu,
+                              MonoObject*& out_ram, MonoObject*& out_fan) {
+    float bg_r = 14.0f/255.0f, bg_g = 16.0f/255.0f, bg_b = 28.0f/255.0f, bg_a = 0.92f;
+    float pink_r = 236.0f/255.0f, pink_g = 72.0f/255.0f, pink_b = 153.0f/255.0f;
+    float cyn_r = 56.0f/255.0f, cyn_g = 189.0f/255.0f, cyn_b = 248.0f/255.0f;
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x, base_y, "CPU • ZEN 2", "--°C", "CORE HEAT",
+                        bg_r, bg_g, bg_b, bg_a, pink_r, pink_g, pink_b, cyn_r, cyn_g, cyn_b, 1.0f, 1.0f, 1.0f, out_cpu);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x + 146.0f, base_y, "GPU • RDNA 2", "--°C", "SOC SILICON",
+                        bg_r, bg_g, bg_b, bg_a, cyn_r, cyn_g, cyn_b, pink_r, pink_g, pink_b, 1.0f, 1.0f, 1.0f, out_gpu);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x + 292.0f, base_y, "RAM • POOL", "-- GB", "LPDDR5",
+                        bg_r, bg_g, bg_b, bg_a, 168.0f/255.0f, 85.0f/255.0f, 247.0f/255.0f, cyn_r, cyn_g, cyn_b, 1.0f, 1.0f, 1.0f, out_ram);
+
+    create_modular_card(domain, pui_img, widget_class, panel_class, label_class, root,
+                        base_x + 438.0f, base_y, "FAN • EXHAUST", "--%", "PWM DUTY",
+                        bg_r, bg_g, bg_b, bg_a, 16.0f/255.0f, 185.0f/255.0f, 129.0f/255.0f, pink_r, pink_g, pink_b, 1.0f, 1.0f, 1.0f, out_fan);
+}
+
+static char s_current_theme[32] = "";
+static char s_current_pos[16] = "";
+
+static void apply_theme(const char* theme_name, const char* pos_name,
+                        MonoDomain* domain, MonoImage* pui_img,
+                        MonoClass* widget_class, MonoClass* panel_class, MonoClass* label_class,
+                        MonoObject* root_widget,
+                        MonoObject*& out_cpu, MonoObject*& out_gpu,
+                        MonoObject*& out_ram, MonoObject*& out_fan) {
+    cleanup_active_theme();
+    out_cpu = nullptr;
+    out_gpu = nullptr;
+    out_ram = nullptr;
+    out_fan = nullptr;
+
+    if (!theme_name || strcmp(theme_name, "none") == 0 || strcmp(theme_name, "off") == 0 || strcmp(theme_name, "hide") == 0) {
+        strncpy(s_current_theme, theme_name ? theme_name : "none", sizeof(s_current_theme) - 1);
+        if (pos_name) strncpy(s_current_pos, pos_name, sizeof(s_current_pos) - 1);
+        log_shellui("[SHELLUI] Overlay hidden\n");
+        return;
+    }
+
+    bool is_bottom = (pos_name && strstr(pos_name, "bottom") != nullptr);
+    bool is_right = (pos_name && strstr(pos_name, "right") != nullptr);
+
+    float card_base_x = is_right ? (1920.0f - 584.0f - 24.0f) : 24.0f;
+    float card_base_y = is_bottom ? 988.0f : 16.0f;
+    float ribbon_base_y = is_bottom ? 1046.0f : 0.0f;
+
+    if (strcmp(theme_name, "rog") == 0 || strcmp(theme_name, "9") == 0) {
+        build_theme_rog(domain, pui_img, widget_class, panel_class, label_class, root_widget, card_base_x, card_base_y,
+                        out_cpu, out_gpu, out_ram, out_fan);
+    } else if (strcmp(theme_name, "deck") == 0 || strcmp(theme_name, "1") == 0 || strcmp(theme_name, "5") == 0 || strcmp(theme_name, "bento") == 0) {
+        build_theme_deck(domain, pui_img, widget_class, panel_class, label_class, root_widget, card_base_x, card_base_y,
+                         out_cpu, out_gpu, out_ram, out_fan);
+    } else if (strcmp(theme_name, "cyber") == 0 || strcmp(theme_name, "2") == 0) {
+        build_theme_cyber(domain, pui_img, widget_class, panel_class, label_class, root_widget, card_base_x, card_base_y,
+                          out_cpu, out_gpu, out_ram, out_fan);
+    } else if (strcmp(theme_name, "dock") == 0 || strcmp(theme_name, "4") == 0) {
+        float dock_x = is_right ? (1920.0f - 136.0f - 24.0f) : 24.0f;
+        float dock_y = is_bottom ? (1080.0f - 330.0f - 24.0f) : 24.0f;
+        build_theme_dock(domain, pui_img, widget_class, panel_class, label_class, root_widget, dock_x, dock_y,
+                         out_cpu, out_gpu, out_ram, out_fan);
+    } else if (strcmp(theme_name, "prism") == 0 || strcmp(theme_name, "10") == 0 || strcmp(theme_name, "7") == 0 || strcmp(theme_name, "8") == 0) {
+        build_theme_prism(domain, pui_img, widget_class, panel_class, label_class, root_widget, card_base_x, card_base_y,
+                          out_cpu, out_gpu, out_ram, out_fan);
+    } else if (strcmp(theme_name, "matrix") == 0 || strcmp(theme_name, "6") == 0) {
+        build_theme_matrix(domain, pui_img, widget_class, panel_class, label_class, root_widget, ribbon_base_y,
+                           out_cpu, out_gpu, out_ram, out_fan);
+    } else {
+        /* Default: esports (minimalist top/bottom bar) */
+        build_theme_esports(domain, pui_img, widget_class, panel_class, label_class, root_widget, ribbon_base_y,
+                            out_cpu, out_gpu, out_ram, out_fan);
+    }
+
+    strncpy(s_current_theme, theme_name, sizeof(s_current_theme) - 1);
+    if (pos_name) strncpy(s_current_pos, pos_name, sizeof(s_current_pos) - 1);
+    log_shellui("[SHELLUI] Applied theme '%s' (pos '%s')\n", theme_name, pos_name ? pos_name : "top");
 }
 #endif
 
@@ -360,6 +753,9 @@ int main(int argc, const char* argv[]) {
     MonoProperty* root_prop = mono_class_get_property_from_name(scene_class, "RootWidget");
     MonoMethod* get_root = root_prop ? mono_property_get_get_method(root_prop) : nullptr;
 
+    s_method_remove_from_parent = mono_class_get_method_from_name(widget_class, "RemoveFromParent", 0);
+    log_shellui("[SHELLUI] Widget.RemoveFromParent: %p\n", s_method_remove_from_parent);
+
     if (!find_scene || !get_root) {
         log_shellui("[SHELLUI] FindContainerSceneByPath or get_RootWidget method not found!\n");
         return -1;
@@ -374,99 +770,79 @@ int main(int argc, const char* argv[]) {
 
     log_shellui("[SHELLUI] Overlay ready! Entering game monitoring loop...\n");
 
-    MonoObject* bg_panel = nullptr;
     MonoObject* cpu_val = nullptr;
     MonoObject* gpu_val = nullptr;
     MonoObject* ram_val = nullptr;
     MonoObject* fan_val = nullptr;
     bool attached_to_game = false;
     MonoObject* last_attached_scene = nullptr;
+    MonoObject* last_root_widget = nullptr;
+
+    char target_theme[32] = "esports";
+    char target_pos[16] = "top";
 
     /* Continuous monitoring loop: attaches to Game scene whenever active */
     while (true) {
+        /* Read desired theme from IPC file written by Web Server */
+        FILE* tfp = fopen("/system_tmp/ps5_overlay_theme.txt", "r");
+        if (tfp) {
+            char file_theme[32] = {0};
+            char file_pos[16] = {0};
+            if (fscanf(tfp, "%31s %15s", file_theme, file_pos) >= 1) {
+                strncpy(target_theme, file_theme, sizeof(target_theme) - 1);
+                if (file_pos[0] != '\0') {
+                    strncpy(target_pos, file_pos, sizeof(target_pos) - 1);
+                }
+            }
+            fclose(tfp);
+        }
+
         MonoString* game_str = mono_string_new(domain, "Game");
         void* scene_args[1] = { game_str };
         MonoObject* exc = nullptr;
         MonoObject* game_scene = mono_runtime_invoke(find_scene, nullptr, scene_args, &exc);
 
-        if (game_scene && game_scene != last_attached_scene) {
-            log_shellui("[SHELLUI] Found active Game container scene: %p\n", game_scene);
+        if (game_scene) {
             MonoObject* root_widget = mono_runtime_invoke(get_root, game_scene, nullptr, &exc);
-
             if (root_widget) {
-                log_shellui("[SHELLUI] Game RootWidget: %p. Creating HUD widgets...\n", root_widget);
+                bool scene_changed = (game_scene != last_attached_scene || root_widget != last_root_widget);
+                bool theme_changed = (strcmp(s_current_theme, target_theme) != 0 || strcmp(s_current_pos, target_pos) != 0);
 
-                /* Create HUD background panel */
-                bg_panel = mono_object_new(domain, panel_class);
-                mono_runtime_object_init(bg_panel);
+                if (scene_changed || theme_changed) {
+                    if (scene_changed) {
+                        log_shellui("[SHELLUI] Active Game Scene/Root changed (%p -> %p). Applying theme '%s' (pos '%s')...\n",
+                                    last_root_widget, root_widget, target_theme, target_pos);
+                    } else {
+                        log_shellui("[SHELLUI] Live theme switch requested: '%s' -> '%s' (pos '%s')\n",
+                                    s_current_theme, target_theme, target_pos);
+                    }
 
-                Set_Property(panel_class, bg_panel, "Name", mono_string_new(domain, "id_onion_overlay_bg"));
-                Set_Property(panel_class, bg_panel, "X", 0.0f);
-                Set_Property(panel_class, bg_panel, "Y", 0.0f);
-                Set_Property(panel_class, bg_panel, "Width", 1920.0f);
-                Set_Property(panel_class, bg_panel, "Height", 34.0f);
+                    apply_theme(target_theme, target_pos, domain, pui_img,
+                                widget_class, panel_class, label_class, root_widget,
+                                cpu_val, gpu_val, ram_val, fan_val);
 
-                MonoObject* bg_color = create_ui_color(pui_img, domain, 0.0f, 0.0f, 0.0f, 0.70f);
-                if (bg_color) {
-                    Set_Property_Invoke(panel_class, bg_panel, "BackgroundColor", bg_color);
+                    last_attached_scene = game_scene;
+                    last_root_widget = root_widget;
+                    attached_to_game = true;
                 }
-
-                Set_Property(panel_class, bg_panel, "BackgroundVisibility", true);
-                Set_Property(panel_class, bg_panel, "BackgroundOpacity", 1.0f);
-                Set_Property(panel_class, bg_panel, "BackgroundStyle", 1);
-
-                log_shellui("[SHELLUI] Background panel created. Appending to RootWidget...\n");
-                widget_append_child(widget_class, root_widget, bg_panel);
-
-                /* Font: 18pt, bold=1, weight=900 */
-                MonoObject* hud_font = create_ui_font(pui_img, domain, 18, 1, 900);
-                log_shellui("[SHELLUI] Font created: %p\n", hud_font);
-
-                float y = 5.0f;
-
-                // CPU: #66FF66
-                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_cpu_lbl", 24.0f, y, "CPU", hud_font, 102.0f/255.0f, 1.0f, 102.0f/255.0f);
-                cpu_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                          "id_cpu_val", 72.0f, y, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
-                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_sep1", 138.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
-
-                // GPU: #B366FF
-                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_gpu_lbl", 158.0f, y, "GPU", hud_font, 179.0f/255.0f, 102.0f/255.0f, 1.0f);
-                gpu_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                          "id_gpu_val", 206.0f, y, "--°C", hud_font, 1.0f, 1.0f, 1.0f);
-                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_sep2", 270.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
-
-                // RAM: #FFB34D
-                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_ram_lbl", 290.0f, y, "RAM", hud_font, 1.0f, 179.0f/255.0f, 77.0f/255.0f);
-                ram_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                          "id_ram_val", 344.0f, y, "-- GB", hud_font, 1.0f, 1.0f, 1.0f);
-                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_sep3", 452.0f, y, "|", hud_font, 0.75f, 0.75f, 0.75f);
-
-                // FAN: #33E0FF
-                create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                "id_fan_lbl", 472.0f, y, "FAN", hud_font, 51.0f/255.0f, 224.0f/255.0f, 1.0f);
-                fan_val = create_hud_item(domain, pui_img, widget_class, panel_class, label_class, root_widget,
-                                          "id_fan_val", 518.0f, y, "--%", hud_font, 1.0f, 1.0f, 1.0f);
-
-                last_attached_scene = game_scene;
-                attached_to_game = true;
-                log_shellui("[SHELLUI] HUD attached to Game Scene RootWidget successfully!\n");
             }
-        } else if (!game_scene && attached_to_game) {
+        } else if (attached_to_game) {
             /* Game closed */
-            log_shellui("[SHELLUI] Game closed, waiting for next game...\n");
-            attached_to_game = false;
+            log_shellui("[SHELLUI] Game closed, resetting HUD state...\n");
+            cleanup_active_theme();
+            s_current_theme[0] = '\0';
+            s_current_pos[0] = '\0';
+            cpu_val = nullptr;
+            gpu_val = nullptr;
+            ram_val = nullptr;
+            fan_val = nullptr;
+            last_root_widget = nullptr;
             last_attached_scene = nullptr;
+            attached_to_game = false;
         }
 
         /* Update metrics if attached */
-        if (attached_to_game) {
+        if (attached_to_game && (cpu_val || gpu_val || ram_val || fan_val)) {
             int cpu_temp = 0;
             if (sys_sceKernelGetCpuTemperature) {
                 sys_sceKernelGetCpuTemperature(&cpu_temp);
@@ -499,7 +875,7 @@ int main(int argc, const char* argv[]) {
                 int ram_total = 0, ram_free = 0;
                 if (sys_get_page_table_stats && sys_get_page_table_stats(1, 1, &ram_total, &ram_free) == 0 && ram_total > 0) {
                     int used_mb = ram_total - ram_free;
-                    snprintf(buf, sizeof(buf), "%.1f/16 GB", (float)used_mb / 1024.0f);
+                    snprintf(buf, sizeof(buf), "%.1f GB", (float)used_mb / 1024.0f);
                 } else {
                     snprintf(buf, sizeof(buf), "N/A");
                 }
