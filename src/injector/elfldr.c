@@ -10,8 +10,13 @@
 #include <elf.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/user.h>
 #include <netinet/in.h>
 #include <ps5/kernel.h>
+
+#ifndef PAGE_SIZE
+#define PAGE_SIZE 0x4000
+#endif
 
 #ifndef IPV6_2292PKTOPTIONS
 #define IPV6_2292PKTOPTIONS 25

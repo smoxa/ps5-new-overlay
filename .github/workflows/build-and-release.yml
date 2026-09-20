@@ -73,21 +73,18 @@ jobs:
           mkdir -p build
           cd build
           prospero-cmake .. -DCMAKE_BUILD_TYPE=Release
-          cmake --build . --verbose -j$(nproc)
+          cmake --build . --target ps5_overlay_shellui --verbose -j$(nproc)
+
+          # Embed the newly compiled shellui ELF into embedded_shellui.c
+          python3 ../tools/bin2c.py ps5_overlay_shellui.elf ../src/embedded_shellui.c g_overlay_shellui_elf
+
+          # Build the main overlay ELF with the embedded payload
+          cmake --build . --target ps5_overlay --verbose -j$(nproc)
           cd ..
 
           mkdir -p dist
-          if [ -f "dist/ps5_overlay.elf" ]; then
-            echo "Artifact in dist/ps5_overlay.elf"
-          elif [ -f "build/ps5_overlay.elf" ]; then
-            cp build/ps5_overlay.elf dist/ps5_overlay.elf
-          else
-            echo "ERROR: ps5_overlay.elf was not produced!"
-            exit 1
-          fi
-          if [ -f "build/ps5_overlay_shellui.elf" ]; then
-            cp build/ps5_overlay_shellui.elf dist/ps5_overlay_shellui.elf
-          fi
+          cp build/ps5_overlay.elf dist/ps5_overlay.elf
+          cp build/ps5_overlay_shellui.elf dist/ps5_overlay_shellui.elf
 
           cd dist
           sha256sum ps5_overlay*.elf > SHA256SUMS.txt

@@ -6,14 +6,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <vector>
 
 #if defined(__PS5__) || defined(PS5)
 #include <sys/sysctl.h>
 #include <sys/user.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <ps5/kernel.h>
-#include <ps5/nid.h>
 
 #define PTRACE_AUTHID 0x4800000000010003ULL
 
