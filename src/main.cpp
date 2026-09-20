@@ -4,6 +4,8 @@
 #include "notify.h"
 #include "config.h"
 #include "web_server.h"
+#include "shellui_inject.h"
+#include "embedded_shellui.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,6 +71,25 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[WARNING] Overlay UI init returned false; proceeding with fallback.\n");
     }
 
+    /* Inject in-game overlay into SceShellUI if not already active */
+    if (!test_mode) {
+        if (shellui_is_injected()) {
+            printf("[STATUS] SceShellUI in-game HUD already active.\n");
+        } else {
+            pid_t shellui_pid = shellui_find_pid();
+            if (shellui_pid > 0) {
+                printf("[STATUS] Found SceShellUI (PID: %d). Injecting in-game overlay...\n", shellui_pid);
+                if (shellui_inject_elf(shellui_pid, g_overlay_shellui_elf, g_overlay_shellui_elf_size)) {
+                    printf("[STATUS] Successfully injected HUD into SceShellUI!\n");
+                } else {
+                    fprintf(stderr, "[WARNING] Failed to inject HUD into SceShellUI.\n");
+                }
+            } else {
+                fprintf(stderr, "[WARNING] SceShellUI process not found.\n");
+            }
+        }
+    }
+
     /* Start embedded Web HUD server */
     if (config.web_server_enabled && !test_mode) {
         if (web_server_start(config.web_port)) {
@@ -79,7 +100,7 @@ int main(int argc, char** argv) {
     }
 
     /* Send single startup notification toast */
-    notify_send_hud("PS5 Overlay Started", "Web HUD: port 8080 (/overlay)");
+    notify_send_hud("PS5 Overlay Active", "In-Game HUD: On Screen | Web: port 8080");
 
     printf("[STATUS] Overlay daemon running. Toast interval: %d s | Polling: %d ms\n",
            config.toast_interval_sec, config.update_interval_ms);

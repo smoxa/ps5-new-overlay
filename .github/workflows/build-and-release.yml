@@ -85,9 +85,12 @@ jobs:
             echo "ERROR: ps5_overlay.elf was not produced!"
             exit 1
           fi
+          if [ -f "build/ps5_overlay_shellui.elf" ]; then
+            cp build/ps5_overlay_shellui.elf dist/ps5_overlay_shellui.elf
+          fi
 
           cd dist
-          sha256sum ps5_overlay.elf > SHA256SUMS.txt
+          sha256sum ps5_overlay*.elf > SHA256SUMS.txt
           echo "=== SHA256 Checksums ==="
           cat SHA256SUMS.txt
 
@@ -97,8 +100,9 @@ jobs:
           name: ps5-overlay-build
           path: |
             dist/ps5_overlay.elf
+            dist/ps5_overlay_shellui.elf
             dist/SHA256SUMS.txt
-          if-no-files-found: error
+          if-no-files-found: warn
 
   release:
     name: Publish GitHub Release
@@ -137,27 +141,39 @@ jobs:
           body: |
             ## 🎮 PS5 Hardware Overlay ${{ steps.vars.outputs.tag }}
             
-            Lightweight, standalone in-game hardware monitoring overlay for jailbroken PlayStation 5 (FW 1.xx - 10.xx+).
+            Lightweight, standalone in-game hardware monitoring overlay for jailbroken PlayStation 5 (FW 1.xx - 10.xx+, kstuff active).
             
-            ### ✨ Features
-            - **Native In-Game Toast OSD**: Automatic dual-line HUD toasts updating smoothly over games (`OverwriteLatest`).
-            - **Real-Time Web HUD (Port 8080)**: Dark-mode PlayStation dashboard viewable on phone, PC, or PS5 "Pin to Side" browser.
-            - **CPU Temperature** & **CPU Load** (Zen 2 8-core tracks)
-            - **GPU / SoC Temperature** & **VRAM Usage**
-            - **System RAM Usage** (Used / Total GB and %)
-            - **Cooling Fan Speed** (Duty Cycle %)
-            - Zero extra bloat (no cheats, FTP, or risk of kernel panics)
+            ### ✨ What's New in This Release
+            - **🖥️ Native On-Screen In-Game HUD**:
+              - Automatically injected into `SceShellUI` via `ptrace` (with `kstuff` active).
+              - Rendered directly on top of gameplay via Mono PUI (`Scene.RootWidget`).
+              - Sleek translucent 2D bar at top of screen with color-coded metrics:
+                - **CPU** (Green `#66FF66`)
+                - **GPU** (Purple `#B366FF`)
+                - **RAM** (Orange `#FFB34D`)
+                - **FAN** (Cyan `#33E0FF`)
+            - **🔕 Zero Toast Spam**:
+              - Recurring notification popups completely disabled to protect your gameplay immersion.
+              - Only a single silent startup toast confirms the overlay is loaded.
+            - **🌐 Real-Time Web HUD (Port 8080)**:
+              - Full dashboard at `http://<ps5-ip>:8080/` for phone / PC viewing.
+              - In-game floating bar route at `http://<ps5-ip>:8080/overlay` or `/bar`.
             
             ### 🚀 Quick Start
-            1. Send `ps5_overlay.elf` to your console via port **9020** or **9021** (e.g. `nc -w 3 <ps5_ip> 9020 < ps5_overlay.elf`).
-            2. The overlay starts displaying dual-line toasts every 4s in the corner of your TV screen.
-            3. Open `http://<ps5_ip>:8080/` on your phone or PC (or pin to side in the PS5 browser) for the real-time HUD dashboard.
-            4. (Optional) Customize settings in `/data/ps5_overlay/config.ini`.
+            1. Ensure **kstuff** is active on your PS5.
+            2. Send `ps5_overlay.elf` to your console via port **9020** or **9021**:
+               ```bash
+               nc -w 3 <ps5_ip> 9020 < ps5_overlay.elf
+               ```
+            3. A single notification appears confirming the overlay is active.
+            4. Launch any game — the hardware HUD bar appears at the top of the screen!
+            5. (Optional) Open `http://<ps5_ip>:8080/` in a browser to monitor remotely.
             
             ### 🔒 SHA-256 Checksums
             Included in `SHA256SUMS.txt`.
           files: |
             dist/ps5_overlay.elf
+            dist/ps5_overlay_shellui.elf
             dist/SHA256SUMS.txt
             config.ini.example
         env:
