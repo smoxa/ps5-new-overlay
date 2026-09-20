@@ -42,12 +42,12 @@ font_size = 18
 # Hardware sensors polling interval in milliseconds (default: 1000 = 1s)
 interval_ms = 1000
 
-# Native in-game PS5 notification toast overlay (true/false)
-# Overwrites smoothly in the corner of your TV screen
-toast_notifications = true
+# In-game notification toasts (optional, default: false)
+# When false, only 1 startup toast is sent and no notifications interrupt gameplay.
+toast_notifications = false
 
-# Interval between toast updates in seconds (default: 4)
-toast_interval_sec = 4
+# Interval between toast updates in seconds (if toast_notifications is manually set to true)
+toast_interval_sec = 10
 
 # Embedded real-time Web HUD server (true/false)
 # Accessible via http://<PS5_IP>:8080/ on phone, PC, or PS5 "Pin to Side"

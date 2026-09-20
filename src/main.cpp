@@ -78,8 +78,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    /* Send startup notification toast */
-    notify_send_hud("PS5 Overlay Active", "CPU/GPU & RAM Monitor Running");
+    /* Send single startup notification toast */
+    notify_send_hud("PS5 Overlay Started", "Web HUD: port 8080 (/overlay)");
 
     printf("[STATUS] Overlay daemon running. Toast interval: %d s | Polling: %d ms\n",
            config.toast_interval_sec, config.update_interval_ms);
