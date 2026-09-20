@@ -15,8 +15,19 @@
 #include <cmath>
 
 #if defined(__PS5__) || defined(PS5)
+#include <sys/mman.h>
 #include <ps5/kernel.h>
 #include <sys/syscall.h>
+
+#ifndef PROT_READ
+#define PROT_READ 0x1
+#endif
+#ifndef PROT_WRITE
+#define PROT_WRITE 0x2
+#endif
+#ifndef PROT_EXEC
+#define PROT_EXEC 0x4
+#endif
 
 static void log_shellui(const char* fmt, ...) {
     FILE* fp = fopen("/system_tmp/ps5_overlay.log", "a");
@@ -60,6 +71,7 @@ static uint64_t (*mono_compile_method)(MonoMethod* method) = nullptr;
 static int (*sys_sceKernelGetCpuTemperature)(int* cputemp) = nullptr;
 static int (*sys_sceKernelGetSocSensorTemperature)(int sensorId, int* soctime) = nullptr;
 static int (*sys_sceKernelGetCurrentFanDuty)(uint16_t* duty, uint64_t* chassis) = nullptr;
+static int (*sys_sceKernelMprotect)(void* addr, size_t len, int prot) = nullptr;
 
 #define KERNEL_DLSYM(handle, sym) \
     (*(void**)&sym = (void*)kernel_dynlib_dlsym(-1, handle, #sym))
@@ -103,6 +115,7 @@ static bool resolve_mono_symbols(void) {
     sys_sceKernelGetCpuTemperature = (int(*)(int*))kernel_dynlib_dlsym(-1, libkernel, "sceKernelGetCpuTemperature");
     sys_sceKernelGetSocSensorTemperature = (int(*)(int, int*))kernel_dynlib_dlsym(-1, libkernel, "sceKernelGetSocSensorTemperature");
     sys_sceKernelGetCurrentFanDuty = (int(*)(uint16_t*, uint64_t*))kernel_dynlib_dlsym(-1, libkernel, "sceKernelGetCurrentFanDuty");
+    sys_sceKernelMprotect = (int(*)(void*, size_t, int))kernel_dynlib_dlsym(-1, libkernel, "sceKernelMprotect");
 
     bool ok = (mono_get_root_domain && mono_thread_attach && mono_class_from_name && mono_compile_method);
     log_shellui("[SHELLUI] resolve_mono_symbols result: %s\n", ok ? "SUCCESS" : "FAILED");
@@ -122,7 +135,15 @@ static MonoImage* load_system_dll(MonoDomain* domain, const char* dll_name) {
 
 /* Patch Sony's UI thread check so our background thread can freely manipulate PUI widgets */
 static void patch_main_thread_check(MonoDomain* domain) {
-    MonoImage* core_img = load_system_dll(domain, "Sce.PlayStation.Core.dll");
+    log_shellui("[SHELLUI] Attempting to patch CheckRunningOnMainThread...\n");
+    MonoImage* core_img = nullptr;
+    for (int retry = 0; retry < 10 && !core_img; retry++) {
+        core_img = load_system_dll(domain, "Sce.PlayStation.Core.dll");
+        if (!core_img) {
+            log_shellui("[SHELLUI] Waiting for Sce.PlayStation.Core.dll (%d/10)...\n", retry + 1);
+            sleep(1);
+        }
+    }
     if (!core_img) {
         log_shellui("[SHELLUI] Sce.PlayStation.Core.dll not found\n");
         return;
@@ -142,15 +163,24 @@ static void patch_main_thread_check(MonoDomain* domain) {
         log_shellui("[SHELLUI] Failed to compile CheckRunningOnMainThread\n");
         return;
     }
+    log_shellui("[SHELLUI] CheckRunningOnMainThread address: 0x%lx\n", real_addr);
 
     uint64_t page_addr = real_addr & ~0x3FFFULL;
-    if (kernel_mprotect(-1, page_addr, 0x4000, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+    int r1 = sys_sceKernelMprotect ? sys_sceKernelMprotect((void*)page_addr, 0x4000, PROT_READ | PROT_WRITE | PROT_EXEC) : -1;
+    if (r1 == 0) {
         *(volatile uint8_t*)real_addr = 0xC3; // x86 'ret'
-        kernel_mprotect(-1, page_addr, 0x4000, PROT_READ | PROT_EXEC);
-        log_shellui("[SHELLUI] CheckRunningOnMainThread successfully patched with RET!\n");
-    } else {
-        log_shellui("[SHELLUI] kernel_mprotect failed for CheckRunningOnMainThread patch\n");
+        sys_sceKernelMprotect((void*)page_addr, 0x4000, PROT_READ | PROT_EXEC);
+        log_shellui("[SHELLUI] CheckRunningOnMainThread successfully patched via sceKernelMprotect!\n");
+        return;
     }
+    int r2 = kernel_mprotect(getpid(), page_addr, 0x4000, PROT_READ | PROT_WRITE | PROT_EXEC);
+    if (r2 == 0) {
+        *(volatile uint8_t*)real_addr = 0xC3; // x86 'ret'
+        kernel_mprotect(getpid(), page_addr, 0x4000, PROT_READ | PROT_EXEC);
+        log_shellui("[SHELLUI] CheckRunningOnMainThread successfully patched via kernel_mprotect!\n");
+        return;
+    }
+    log_shellui("[SHELLUI] Failed to patch CheckRunningOnMainThread! (r1=%d, r2=%d)\n", r1, r2);
 }
 
 /* Thunk-compiled direct property setter (as used in onionHEN) */
@@ -225,6 +255,8 @@ static MonoObject* create_hud_label(MonoDomain* domain, MonoImage* pui_img, Mono
     Set_Property(label_class, label, "PositionType", 1);
     Set_Property(label_class, label, "MarginLeft", x);
     Set_Property(label_class, label, "MarginTop", y);
+    Set_Property(label_class, label, "Width", 500.0f);
+    Set_Property(label_class, label, "Height", 40.0f);
     Set_Property(label_class, label, "Text", mono_string_new(domain, text));
     if (font) {
         Set_Property_Invoke(label_class, label, "Font", font);
@@ -410,8 +442,12 @@ int main(int argc, const char* argv[]) {
                 MonoObject* center_lbl = create_hud_label(domain, pui_img, label_class, "id_center_test",
                                                           640.0f, 480.0f, "PS5 OVERLAY ACTIVE",
                                                           center_font, 1.0f, 0.90f, 0.0f);
-                widget_append_child(widget_class, root_widget, center_lbl);
-                log_shellui("[SHELLUI] Center test banner added!\n");
+                if (center_lbl) {
+                    Set_Property(label_class, center_lbl, "Width", 800.0f);
+                    Set_Property(label_class, center_lbl, "Height", 80.0f);
+                    widget_append_child(widget_class, root_widget, center_lbl);
+                    log_shellui("[SHELLUI] Center test banner added!\n");
+                }
 
                 last_attached_scene = game_scene;
                 attached_to_game = true;
