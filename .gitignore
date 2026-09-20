@@ -1,0 +1,36 @@
+# Build artifacts
+build/
+build-*/
+dist/
+bin/
+*.elf
+*.bin
+*.o
+*.obj
+*.a
+*.so
+*.sprx
+*.d
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile.cmake
+compile_commands.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Dependencies
+.deps/
+ps5-payload-sdk/
+
+# Logs and system
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,49 @@
+# =======================================================
+# PS5 Hardware Overlay Configuration
+# Place this file on your PS5 at:
+# /data/ps5_overlay/config.ini
+# =======================================================
+
+[ps5_overlay]
+
+# Enable or disable the overlay
+enabled = true
+
+# Screen position: "top" or "bottom"
+position = top
+
+# Show CPU temperature (Celsius)
+show_cpu_temp = true
+
+# Show CPU utilization percentage
+show_cpu_load = true
+
+# Show per-core CPU load instead of overall average
+show_all_cores = false
+
+# Show GPU / APU SOC temperature (Celsius)
+show_gpu_temp = true
+
+# Show VRAM usage percentage
+show_gpu_load = true
+
+# Show system RAM usage (e.g. 4320 MB (27%))
+show_ram = true
+
+# Show cooling fan duty cycle percentage
+show_fan = true
+
+# Display a translucent background bar behind HUD text
+background = true
+
+# Font size in points (default: 18)
+font_size = 18
+
+# Update interval in milliseconds (default: 1000 = 1 second)
+interval_ms = 1000
+
+# Periodic system notification toast (optional fallback, true/false)
+toast_notifications = false
+
+# Interval for toast notifications if enabled (seconds)
+toast_interval_sec = 10
