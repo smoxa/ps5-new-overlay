@@ -140,12 +140,14 @@ jobs:
             
             Lightweight, standalone in-game hardware monitoring overlay for jailbroken PlayStation 5 (FW 1.xx - 10.xx+, kstuff active).
             
-            ### ✨ What's New in v1.0.14
+            ### ✨ What's New in v1.0.15
+            - **🧹 Streamlined Architecture (Pure In-Game Overlay)**:
+              - Completely removed embedded HTTP web server, sockets, and heavy HTML template assets.
+              - Minimal footprint, zero background network listening, and maximum stability.
             - **⚡ Real-Time In-Game FPS Counter**:
               - Hardware scanout flip delta sampling via Display Controller Engine (`/dev/dce`, `ioctl 0x80308217`).
               - Native fallback support for OnionHEN seqlock sampler (`/system_tmp/fps_sample`).
               - Dedicated **FPS** badge in gold/yellow (`#FFEB3B`) with live framerate (`60` / `120` / `--`).
-              - Dedicated **Frame Rate** card on Web HUD dashboard and live floating `/bar`.
               - Configurable via `show_fps = true` in `/data/ps5_overlay/config.ini`.
             - **🖥️ Native On-Screen In-Game HUD**:
               - Automatically injected into `SceShellUI` via `ptrace` (with `kstuff` active).
@@ -159,9 +161,6 @@ jobs:
             - **🔕 Zero Toast Spam**:
               - Recurring notification popups completely disabled to protect your gameplay immersion.
               - Only a single silent startup toast confirms the overlay is loaded.
-            - **🌐 Real-Time Web HUD (Port 8080)**:
-              - Full dashboard at `http://<ps5-ip>:8080/` for phone / PC viewing.
-              - In-game floating bar route at `http://<ps5-ip>:8080/overlay` or `/bar`.
             
             ### 🚀 Quick Start
             1. Ensure **kstuff** is active on your PS5.
@@ -171,7 +170,6 @@ jobs:
                ```
             3. A single notification appears confirming the overlay is active.
             4. Launch any game — the hardware HUD bar appears at the top of the screen!
-            5. (Optional) Open `http://<ps5_ip>:8080/` in a browser to monitor remotely.
             
             ### 🔒 SHA-256 Checksums
             Included in `SHA256SUMS.txt`.

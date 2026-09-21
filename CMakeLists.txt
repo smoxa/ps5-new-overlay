@@ -28,7 +28,6 @@ set(COMMON_SOURCES
     src/overlay_ui.cpp
     src/notify.cpp
     src/config.cpp
-    src/web_server.cpp
     src/injector/pt.c
     src/injector/elfldr.c
     src/injector/shellui_inject.cpp
@@ -68,7 +67,7 @@ if(IS_PS5_BUILD)
         SceLibcInternal
     )
 
-    # 2. Target: Main loader daemon & Web HUD server
+    # 2. Target: Main loader daemon & in-game HUD injector
     add_executable(ps5_overlay ${COMMON_SOURCES} src/embedded_shellui.c)
     set_target_properties(ps5_overlay PROPERTIES
         OUTPUT_NAME "ps5_overlay"
@@ -96,7 +95,6 @@ if(IS_PS5_BUILD)
         kernel_sys
         SceNotification
         SceLibcInternal
-        SceNet
     )
 
     add_dependencies(ps5_overlay ps5_overlay_shellui)

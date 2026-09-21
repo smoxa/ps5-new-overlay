@@ -24,27 +24,18 @@
 - 🌡️ **Температура CPU & GPU (SoC)**: Прямое чтение сенсоров в реальном времени (°C).
 - 💾 **Использование RAM & VRAM**: Объем занятой системной и видеопамяти.
 - 🌀 **Обороты кулера (Fan Duty)**: Скорость вращения вентилятора в процентах.
-- 🌐 **Встроенный Web HUD (Порт 8080)**: Веб-дашборд с живыми графиками на телефоне / ПК и плавающий оверлей по адресам `/overlay` и `/bar`.
 - ⚙️ **Гибкая конфигурация**: Настройка через файл `/data/ps5_overlay/config.ini`.
 
 ---
 
-### Режимы отображения
+### Отображение в играх
 
-1. **Наэкранный HUD в играх (SceShellUI)**:
-   - Внедряется автоматически в системный процесс `SceShellUI`.
-   - В верхней части экрана во время любой игры отображается стильная полупрозрачная плашка с цветными показателями:
-     ```text
-     FPS: 60  |  CPU: 58°C  |  GPU: 61°C  |  RAM: 4.8 GB  |  FAN: 35%
-     ```
-2. **Второй экран (Смартфон / Планшет / ПК)**:
-   - Откройте в браузере любого устройства в домашней сети адрес:
-     ```text
-     http://<IP_ВАШЕЙ_PS5>:8080/
-     ```
-   - Живой дашборд с индикаторами температуры, шкалами нагрузки и частотой опроса 1 раз в секунду.
-3. **Плавающий оверлей для браузера (OBS / Встроенный браузер)**:
-   - `http://<IP_PS5>:8080/overlay` или `/bar` для вывода компактного виджета.
+- **Наэкранный HUD в играх (SceShellUI)**:
+  - Внедряется автоматически в системный процесс `SceShellUI`.
+  - В верхней части экрана во время любой игры отображается аккуратная полупрозрачная плашка с цветными показателями:
+    ```text
+    FPS: 60  |  CPU: 58°C  |  GPU: 61°C  |  RAM: 4.8 GB  |  FAN: 35%
+    ```
 
 ---
 
@@ -91,9 +82,6 @@ interval_ms = 1000          ; Опрос сенсоров (мс)
 
 toast_notifications = false ; Экранный OSD в играх (true/false)
 toast_interval_sec = 10     ; Интервал обновления OSD (сек)
-
-web_server = true           ; Встроенный Web HUD сервер
-web_port = 8080             ; Порт Web HUD (по умолч. 8080)
 ```
 
 ---
@@ -116,7 +104,6 @@ Unlike full HEN suites (like onionHEN or etaHEN), this project focuses **exclusi
 - 💾 **System RAM**: Memory footprint in GB and percentage (`4.8 / 16.0 GB`).
 - 🌀 **Fan Duty Cycle**: Real-time cooling fan speed percentage.
 - 🔕 **Zero Toast Spam**: Notification popups disabled by default to protect gameplay immersion.
-- 🌐 **Embedded Web HUD (Port 8080)**: Dark PlayStation-themed real-time dashboard accessible via smartphone, PC, or PS5 "Pin to Side" browser.
 - ⚙️ **Configurable**: Managed via `/data/ps5_overlay/config.ini`.
 
 ---

@@ -3,7 +3,6 @@
 #include "overlay_ui.h"
 #include "notify.h"
 #include "config.h"
-#include "web_server.h"
 #include "shellui_inject.h"
 #include "embedded_shellui.h"
 
@@ -91,20 +90,11 @@ int main(int argc, char** argv) {
         }
     }
 
-    /* Start embedded Web HUD server */
-    if (config.web_server_enabled && !test_mode) {
-        if (web_server_start(config.web_port)) {
-            printf("[STATUS] Web HUD running at http://0.0.0.0:%d/\n", config.web_port);
-        } else {
-            fprintf(stderr, "[WARNING] Failed to start Web HUD server on port %d\n", config.web_port);
-        }
-    }
-
     /* Send single startup notification toast */
     if (hud_injected) {
-        notify_send_hud("PS5 Overlay Active", "HUD Injected! Open game to see OSD | Web: 8080");
+        notify_send_hud("PS5 Overlay Active", "HUD Injected! Launch any game to view overlay");
     } else {
-        notify_send_hud("PS5 Overlay Warning", "HUD inject failed. Check http://<ip>:8080/log");
+        notify_send_hud("PS5 Overlay Warning", "HUD injection failed. Check /system_tmp/ps5_overlay.log");
     }
 
     printf("[STATUS] Overlay daemon running. Toast interval: %d s | Polling: %d ms\n",
@@ -123,10 +113,6 @@ int main(int argc, char** argv) {
             monitor_format_hud_lines(&metrics, &config, hud_line1, sizeof(hud_line1), hud_line2, sizeof(hud_line2));
 
             overlay_ui_update(hud_text);
-
-            if (config.web_server_enabled) {
-                web_server_update_metrics(&metrics);
-            }
 
             if (config.toast_notifications) {
                 time_t now = time(nullptr);
@@ -148,9 +134,6 @@ int main(int argc, char** argv) {
     }
 
     printf("\n[STATUS] Shutting down PS5 Overlay daemon...\n");
-    if (config.web_server_enabled) {
-        web_server_stop();
-    }
     overlay_ui_shutdown();
     monitor_cleanup();
     printf("[STATUS] Goodbye!\n");

@@ -20,8 +20,6 @@ void config_set_defaults(OverlayConfig* config) {
     config->font_size = 18;
     config->toast_notifications = false;
     config->toast_interval_sec = 10;
-    config->web_server_enabled = true;
-    config->web_port = 8080;
 }
 
 static char* trim_whitespace(char* str) {
@@ -104,11 +102,6 @@ bool config_load(OverlayConfig* config, const char* filepath) {
         } else if (strcasecmp(key, "toast_interval_sec") == 0) {
             int t = atoi(val);
             if (t >= 1 && t <= 3600) config->toast_interval_sec = t;
-        } else if (strcasecmp(key, "web_server") == 0 || strcasecmp(key, "web_server_enabled") == 0) {
-            config->web_server_enabled = parse_bool(val, config->web_server_enabled);
-        } else if (strcasecmp(key, "web_port") == 0) {
-            int p = atoi(val);
-            if (p >= 1 && p <= 65535) config->web_port = p;
         }
     }
 
@@ -138,8 +131,6 @@ bool config_save(const OverlayConfig* config, const char* filepath) {
     fprintf(fp, "interval_ms=%d\n", config->update_interval_ms);
     fprintf(fp, "toast_notifications=%s\n", config->toast_notifications ? "true" : "false");
     fprintf(fp, "toast_interval_sec=%d\n", config->toast_interval_sec);
-    fprintf(fp, "web_server=%s\n", config->web_server_enabled ? "true" : "false");
-    fprintf(fp, "web_port=%d\n", config->web_port);
 
     fclose(fp);
     return true;

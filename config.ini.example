@@ -51,10 +51,3 @@ toast_notifications = false
 
 # Interval between toast updates in seconds (if toast_notifications is manually set to true)
 toast_interval_sec = 10
-
-# Embedded real-time Web HUD server (true/false)
-# Accessible via http://<PS5_IP>:8080/ on phone, PC, or PS5 "Pin to Side"
-web_server = true
-
-# Port for Web HUD server (default: 8080)
-web_port = 8080
