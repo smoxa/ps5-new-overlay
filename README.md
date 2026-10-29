@@ -141,11 +141,11 @@ port = 8585
 [metrics]
 order = fps,cpu,load,cclk,gpu,gclk,ram,vram,ssd,fan,pwr,ip
 
-[metric_fps]
+[fps]
 enabled = true
 color = #FFEB3B
 
-[metric_ssd]
+[ssd]
 enabled = true
 color = #00E5FF
 ...
@@ -153,6 +153,12 @@ color = #00E5FF
 ```
 
 ---
+
+## Config troubleshooting
+
+The configuration example is an excerpt; the ... line is a placeholder, not an INI setting to copy. Use metric IDs as section names, such as [cpu], [gpu], and [ip] (not [metric_cpu]). The payload reads /data/overlay/config.ini when it starts, so restart or reload the overlay after editing the file manually. To hide the console address, set enabled = false under [ip].
+
+
 
 ## 🤝 Acknowledgments
 
